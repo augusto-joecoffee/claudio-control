@@ -1,6 +1,12 @@
-# Claude Control
+<p align="center">
+  <img src="public/icon.png" alt="Claude Control" width="128" height="128">
+</p>
 
-A native macOS desktop app for monitoring and managing multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions in real time.
+<h1 align="center">Claude Control</h1>
+
+<p align="center">
+  A native macOS desktop app for monitoring and managing multiple <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> sessions in real time.
+</p>
 
 When you're running several Claude Code instances across different repos and worktrees, it's hard to keep track of what each one is doing. Claude Control auto-discovers all running sessions and gives you a single dashboard with live status, git changes, conversation previews, and quick actions.
 
