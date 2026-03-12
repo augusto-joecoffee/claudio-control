@@ -10,8 +10,7 @@
 
 When you're running several Claude Code instances across different repos and worktrees, it's hard to keep track of what each one is doing. Claude Control auto-discovers all running sessions and gives you a single dashboard with live status, git changes, conversation previews, and quick actions.
 
-<!-- Screenshot placeholder: add a screenshot of the dashboard here -->
-<!-- ![Dashboard](docs/screenshot.png) -->
+![Dashboard](docs/screenshot.png)
 
 ## Features
 
