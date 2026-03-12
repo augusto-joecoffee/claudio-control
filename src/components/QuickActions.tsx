@@ -34,7 +34,6 @@ export function QuickActions({
   pid,
   targetScreen,
   status,
-  branch,
   prUrl,
   onCleanup,
 }: {
@@ -42,7 +41,6 @@ export function QuickActions({
   pid?: number | null;
   targetScreen?: number | null;
   status?: string;
-  branch?: string | null;
   prUrl?: string | null;
   onCleanup?: (e: React.MouseEvent) => void;
 }) {

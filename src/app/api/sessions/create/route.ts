@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { execFile, exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import { stat } from "fs/promises";
 
 const execFileAsync = promisify(execFile);
-const execAsync = promisify(exec);
 
 interface CreateRequest {
   repoPath: string;

@@ -191,7 +191,6 @@ export function SessionCard({ session, targetScreen, pulse }: { session: ClaudeS
               pid={session.pid}
               targetScreen={targetScreen}
               status={session.status}
-              branch={session.branch}
               prUrl={session.prUrl}
               onCleanup={canCleanup ? handleCleanup : undefined}
             />

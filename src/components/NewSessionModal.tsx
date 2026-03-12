@@ -167,7 +167,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
             <div className="space-y-3">
               <div className="px-3 py-3 rounded-lg bg-blue-500/5 border border-blue-500/15">
                 <p className="text-sm text-zinc-300">
-                  Select the folder where your repositories live. We'll scan it for git repos.
+                  Select the folder where your repositories live. We&apos;ll scan it for git repos.
                 </p>
               </div>
               <button
