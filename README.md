@@ -37,6 +37,11 @@ When you're running several Claude Code instances across different repos and wor
 
 Download the latest `.dmg` from the [Releases](../../releases) page, open it, and drag the app to Applications.
 
+> **Note:** The app is not notarized with Apple, so macOS will block it on first launch. To get past Gatekeeper, either right-click the app and select **Open**, or run:
+> ```bash
+> xattr -cr /Applications/Claude\ Control.app
+> ```
+
 ## Build from source
 
 ```bash
