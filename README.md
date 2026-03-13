@@ -8,7 +8,7 @@
   A native macOS desktop app for monitoring and managing multiple <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> sessions in real time.
 </p>
 
-When you're running several Claude Code instances across different repos and worktrees, it's hard to keep track of what each one is doing. Claude Control auto-discovers all running sessions and gives you a single dashboard with live status, git changes, conversation previews, and quick actions.
+When you're running several Claude Code instances across different repos and worktrees, it's hard to keep track of what each one is doing. Claude Control auto-discovers all running sessions and gives you a single dashboard with live status, git changes, conversation previews, and quick actions — without leaving the app.
 
 ![Dashboard](docs/screenshot.png)
 
@@ -17,13 +17,19 @@ When you're running several Claude Code instances across different repos and wor
 - **Auto-discovery** — Detects all running `claude` CLI processes via the process table and maps them to their JSONL conversation logs
 - **Live status** — Classifies each session as Working, Idle, Waiting (needs input), Errored, or Finished based on CPU usage, file modification times, and conversation state
 - **Git integration** — Shows branch name, changed files, additions/deletions, and detects open pull requests via `gh`
+- **PR status badges** — Live CI check rollup (passing/failing/pending), review decision, unresolved threads, merge conflicts, and merged/closed state
 - **Task context** — Extracts Linear issue titles and descriptions from MCP tool results to show what each session is working on
 - **Conversation preview** — Shows the last assistant message, active tool, and user prompt for each session
-- **Notification sounds** — Plays a subtle chime when a session transitions from working to waiting/idle
-- **Quick actions** — One-click buttons to focus the iTerm tab, open VS Code, Fork, or Finder for any session
+- **Approve/reject from dashboard** — Approve or reject tool-use permission prompts directly from the dashboard without switching to the terminal
+- **Keyboard shortcuts** — Number keys (1-9) to select sessions, Tab/Shift+Tab to cycle, A/X to approve/reject, Enter to focus iTerm, E/G/F/P for editor/git/finder/PR
+- **Desktop notifications** — Native macOS notifications when sessions finish working or need attention (configurable)
+- **Notification sounds** — Subtle two-tone chime on status transitions (configurable)
+- **Quick actions** — One-click buttons to focus the iTerm tab, open your editor, git GUI, Finder, or PR link for any session
+- **Configurable tools** — Choose your preferred code editor (VS Code, Cursor, Zed, etc.), git GUI (Fork, Sublime Merge, etc.), and browser (Chrome, Arc, Safari, etc.)
 - **New session creation** — Create new Claude Code sessions with git worktree support, repo browsing, and custom initial prompts
 - **PR workflow** — Send `/create-pr` to idle sessions and see PR links once created
 - **Worktree cleanup** — Remove worktrees, branches, and kill sessions with a two-step confirmation flow
+- **Multi-monitor support** — Target which display apps open on
 
 ## Requirements
 
@@ -46,7 +52,7 @@ Download the latest `.dmg` from the [Releases](../../releases) page, open it, an
 
 ```bash
 # Clone the repo
-git clone https://github.com/your-username/claude-control.git
+git clone https://github.com/sverrirsig/claude-control.git
 cd claude-control
 
 # Install dependencies
@@ -97,7 +103,7 @@ The development server runs on port 3200. The Electron shell loads it automatica
 ```
 Electron shell (macOS native window)
     ↓
-Browser (SWR polls /api/sessions every 2s)
+Browser (SWR polls /api/sessions every 1s)
     ↓
 Next.js API Routes (standalone server)
     ↓
@@ -127,9 +133,10 @@ You can add multiple code directories. The app scans up to two levels deep for g
 │   ├── app/
 │   │   ├── page.tsx             # Dashboard
 │   │   ├── session/[id]/        # Session detail view
-│   │   └── api/                 # API routes (sessions, actions, repos)
+│   │   ├── settings/            # Settings page
+│   │   └── api/                 # API routes (sessions, actions, repos, PR status)
 │   ├── components/              # React components
-│   ├── hooks/                   # SWR hooks, notification sound
+│   ├── hooks/                   # SWR hooks, keyboard shortcuts, notifications
 │   └── lib/                     # Core logic (discovery, git, JSONL parsing)
 ├── scripts/
 │   ├── prepare-build.js         # Assembles standalone Next.js app
@@ -144,16 +151,17 @@ You can add multiple code directories. The app scans up to two levels deep for g
 - **Next.js 14** (App Router, standalone output) — Serves both API and UI from a single process
 - **TypeScript** (strict)
 - **Tailwind CSS 3** — Dark theme
-- **SWR** — Client-side polling with 2-second intervals
+- **SWR** — Client-side polling with 1-second intervals
 
 ## Contributing
 
-This is a side project built for personal use. PRs welcome if you find it useful and want to improve it.
+PRs welcome! To get started, clone the repo and run `npm run electron:dev` — that's it.
 
 Some areas that could use work:
 - Linux/Windows support (currently macOS-only due to AppleScript usage)
-- Better status detection for permission prompts
 - Support for other terminals beyond iTerm2
+- Session history and cost/token tracking
+- See [IDEAS.md](IDEAS.md) for more feature ideas
 
 ## License
 
