@@ -92,6 +92,27 @@ export function useKeyboardShortcuts({ sessions, targetScreen, onNewGlobal, onNe
 
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
+      // Arrow Up/Down: navigate sessions
+      if (e.key === "ArrowDown") {
+        if (orderedSessions.length === 0) return;
+        e.preventDefault();
+        setSelectedIndex((prev) => {
+          if (prev === null) return 0;
+          if (prev >= orderedSessions.length - 1) return 0;
+          return prev + 1;
+        });
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        if (orderedSessions.length === 0) return;
+        e.preventDefault();
+        setSelectedIndex((prev) => {
+          if (prev === null || prev === 0) return orderedSessions.length - 1;
+          return prev - 1;
+        });
+        return;
+      }
+
       // Tab / Shift+Tab: cycle through sessions
       if (e.key === "Tab") {
         if (orderedSessions.length === 0) return;

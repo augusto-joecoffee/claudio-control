@@ -115,8 +115,19 @@ function summarizeToolInput(name: string, input?: Record<string, unknown>): stri
       return typeof input.pattern === "string" ? input.pattern : null;
     case "Grep":
       return typeof input.pattern === "string" ? `/${input.pattern}/` : null;
-    default:
+    case "Skill":
+      return typeof input.skill === "string" ? input.skill : null;
+    case "Agent":
+      return typeof input.description === "string" ? input.description : (typeof input.prompt === "string" ? input.prompt.slice(0, 200) : null);
+    default: {
+      // Fallback: show the first short string value from the input
+      for (const val of Object.values(input)) {
+        if (typeof val === "string" && val.length > 0 && val.length <= 200) {
+          return val;
+        }
+      }
       return null;
+    }
   }
 }
 

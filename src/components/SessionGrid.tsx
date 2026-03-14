@@ -2,8 +2,11 @@
 
 import { ClaudeSession, PrStatus } from "@/lib/types";
 import { SessionCard } from "./SessionCard";
+import { SessionRow } from "./SessionRow";
+import { ViewMode } from "./DashboardHeader";
 
 import { groupSessions } from "@/lib/group-sessions";
+import { mutate } from "swr";
 
 function prettifyName(name: string): string {
   return name
@@ -11,7 +14,7 @@ function prettifyName(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function SessionGrid({ sessions, targetScreen, freshlyChanged, selectedIndex, onSelectIndex, actionFeedback, prStatuses, onNewSessionInRepo, actedSessions, onApproveReject }: { sessions: ClaudeSession[]; targetScreen?: number | null; freshlyChanged?: Set<string>; selectedIndex?: number | null; onSelectIndex?: (idx: number | null) => void; actionFeedback?: { label: string; color: string } | null; prStatuses?: Record<string, PrStatus | null>; onNewSessionInRepo?: (repoPath: string, repoName: string) => void; actedSessions?: Record<string, { action: "approve" | "reject"; at: number }>; onApproveReject?: (sessionId: string, action: "approve" | "reject") => void }) {
+export function SessionGrid({ sessions, viewMode, targetScreen, freshlyChanged, selectedIndex, onSelectIndex, actionFeedback, prStatuses, onNewSessionInRepo, actedSessions, onApproveReject }: { sessions: ClaudeSession[]; viewMode: ViewMode; targetScreen?: number | null; freshlyChanged?: Set<string>; selectedIndex?: number | null; onSelectIndex?: (idx: number | null) => void; actionFeedback?: { label: string; color: string } | null; prStatuses?: Record<string, PrStatus | null>; onNewSessionInRepo?: (repoPath: string, repoName: string) => void; actedSessions?: Record<string, { action: "approve" | "reject"; at: number }>; onApproveReject?: (sessionId: string, action: "approve" | "reject") => void }) {
   if (sessions.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-32">
@@ -40,11 +43,37 @@ export function SessionGrid({ sessions, targetScreen, freshlyChanged, selectedIn
     }
   }
 
-  const renderCard = (session: ClaudeSession) => {
+  const getSessionProps = (session: ClaudeSession) => {
     const key = `${session.id}-${session.pid}`;
     const idx = flatIndexMap.get(key) ?? -1;
     const hasSelection = selectedIndex !== null && selectedIndex !== undefined;
     const isSelected = hasSelection && idx === selectedIndex;
+    const acted = actedSessions?.[session.id];
+    const displayStatus = acted
+      ? (acted.action === "reject" ? "idle" as const : "working" as const)
+      : session.status;
+
+    return { key, idx, isSelected, acted, displayStatus };
+  };
+
+  const sendKeystrokeForRow = async (pid: number, keystroke: string, sessionId: string, action: "approve" | "reject") => {
+    onApproveReject?.(sessionId, action);
+    try {
+      await fetch("/api/actions/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send-keystroke", pid, keystroke }),
+      });
+      for (const ms of [300, 700, 1200, 2000, 3000]) {
+        setTimeout(() => mutate("/api/sessions"), ms);
+      }
+    } catch (err) {
+      console.error("Keystroke failed:", err);
+    }
+  };
+
+  const renderCard = (session: ClaudeSession) => {
+    const { key, idx, isSelected } = getSessionProps(session);
     return (
       <SessionCard
         key={key}
@@ -62,9 +91,33 @@ export function SessionGrid({ sessions, targetScreen, freshlyChanged, selectedIn
     );
   };
 
+  const renderRow = (session: ClaudeSession) => {
+    const { key, idx, isSelected, displayStatus } = getSessionProps(session);
+    return (
+      <SessionRow
+        key={key}
+        session={session}
+        selected={isSelected}
+        shortcutNumber={idx < 9 ? idx + 1 : undefined}
+        prStatus={session.prUrl ? prStatuses?.[session.prUrl] ?? undefined : undefined}
+        onSelect={() => onSelectIndex?.(isSelected ? null : idx)}
+        displayStatus={displayStatus}
+        onApproveReject={session.pid ? (action) => {
+          sendKeystrokeForRow(session.pid!, action === "approve" ? "return" : "escape", session.id, action);
+        } : undefined}
+      />
+    );
+  };
+
+  const renderItem = viewMode === "list" ? renderRow : renderCard;
+
   // If there's only one group with one session, skip the grouping chrome
   if (groups.length === 1 && groups[0].sessions.length === 1) {
-    return (
+    return viewMode === "list" ? (
+      <div className="space-y-1">
+        {sessions.map(renderRow)}
+      </div>
+    ) : (
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 items-start">
         {sessions.map(renderCard)}
       </div>
@@ -76,7 +129,7 @@ export function SessionGrid({ sessions, targetScreen, freshlyChanged, selectedIn
       {groups.map((group) => (
         <div key={group.repoPath}>
           {/* Group header */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className={`flex items-center gap-3 ${viewMode === "list" ? "mb-2" : "mb-4"}`}>
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
@@ -101,9 +154,15 @@ export function SessionGrid({ sessions, targetScreen, freshlyChanged, selectedIn
           </div>
 
           {/* Sessions in this group */}
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 items-start">
-            {group.sessions.map(renderCard)}
-          </div>
+          {viewMode === "list" ? (
+            <div className="space-y-1">
+              {group.sessions.map(renderRow)}
+            </div>
+          ) : (
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 items-start">
+              {group.sessions.map(renderCard)}
+            </div>
+          )}
         </div>
       ))}
     </div>

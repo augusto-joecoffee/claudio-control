@@ -7,7 +7,7 @@ import { useDesktopNotification } from "@/hooks/useDesktopNotification";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrStatus } from "@/hooks/usePrStatus";
 import { useSettings } from "@/hooks/useSettings";
-import { DashboardHeader } from "@/components/DashboardHeader";
+import { DashboardHeader, ViewMode } from "@/components/DashboardHeader";
 import { SessionGrid } from "@/components/SessionGrid";
 import { NewSessionModal } from "@/components/NewSessionModal";
 import { KeyboardHints } from "@/components/KeyboardHints";
@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [targetScreen, setTargetScreen] = useState<number | null>(null);
   const [freshlyChanged, setFreshlyChanged] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<{ repoPath?: string; repoName?: string } | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
   // Optimistic approve/reject state: sessionId → { action, timestamp }
   const [actedSessions, setActedSessions] = useState<Record<string, { action: "approve" | "reject"; at: number }>>({});
 
@@ -87,10 +88,17 @@ export default function Dashboard() {
   const playChime = useNotificationSound();
   const sendNotification = useDesktopNotification();
 
-  // Persist screen preference
+  // Persist preferences
   useEffect(() => {
     const saved = localStorage.getItem("targetScreen");
     if (saved !== null) setTargetScreen(saved === "" ? null : parseInt(saved, 10));
+    const savedView = localStorage.getItem("viewMode");
+    if (savedView === "grid" || savedView === "list") setViewMode(savedView);
+  }, []);
+
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem("viewMode", mode);
   }, []);
 
   // Detect status transitions → sound + pulse (with debounce)
@@ -143,6 +151,8 @@ export default function Dashboard() {
       <DashboardHeader
         sessionCount={sessions.length}
         onNewSession={handleNewGlobal}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
       />
 
       {isLoading && sessions.length === 0 && (
@@ -165,6 +175,7 @@ export default function Dashboard() {
 
       <SessionGrid
         sessions={sessions}
+        viewMode={viewMode}
         targetScreen={targetScreen}
         freshlyChanged={freshlyChanged}
         selectedIndex={selectedIndex}
