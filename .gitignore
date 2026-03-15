@@ -10,3 +10,6 @@ next-app-dist/
 # Temporary / local
 tmp/
 .DS_Store
+
+# Claude Code
+.claude/worktrees/
