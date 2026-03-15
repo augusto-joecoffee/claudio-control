@@ -17,35 +17,43 @@ const execFileAsync = promisify(execFile);
 
 export const dynamic = "force-dynamic";
 
-async function checkInstalledApps<T extends { appName: string }>(
+async function checkInstalledApps<T extends { appName: string; command?: string }>(
   options: T[],
   alwaysInstalled?: Set<string>,
 ): Promise<(T & { installed: boolean })[]> {
   return Promise.all(
     options.map(async (opt) => {
-      if (alwaysInstalled?.has(opt.appName)) return { ...opt, installed: true };
-      try {
-        await execFileAsync("open", ["-Ra", opt.appName], { timeout: 3000 });
-        return { ...opt, installed: true };
-      } catch {
-        return { ...opt, installed: false };
+      if (!opt.appName || alwaysInstalled?.has(opt.appName)) return { ...opt, installed: true };
+      // Try macOS app bundle first, then CLI command as fallback
+      const checks = [
+        execFileAsync("open", ["-Ra", opt.appName], { timeout: 3000 }).then(() => true, () => false),
+      ];
+      if (opt.command) {
+        checks.push(
+          execFileAsync("which", [opt.command], { timeout: 3000 }).then(() => true, () => false),
+        );
       }
+      const results = await Promise.all(checks);
+      return { ...opt, installed: results.some(Boolean) };
     })
   );
 }
 
 export async function GET() {
   try {
-    const [config, terminalApps, browsers] = await Promise.all([
+    const [config, terminalApps, browsers, editors, gitGuis] = await Promise.all([
       loadConfig(),
       checkInstalledApps(TERMINAL_APP_OPTIONS, new Set(["Terminal"])),
       checkInstalledApps(BROWSER_OPTIONS, new Set(["Safari"])),
+      checkInstalledApps(EDITOR_OPTIONS),
+      checkInstalledApps(GIT_GUI_OPTIONS),
     ]);
+
     return NextResponse.json({
       config,
       options: {
-        editors: EDITOR_OPTIONS,
-        gitGuis: GIT_GUI_OPTIONS,
+        editors,
+        gitGuis,
         browsers,
         terminalApps,
         terminalOpenIn: TERMINAL_OPEN_IN_OPTIONS,

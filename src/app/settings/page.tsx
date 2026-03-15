@@ -27,8 +27,8 @@ interface SettingsData {
     terminalTmuxMode: string;
   };
   options: {
-    editors: OptionDef[];
-    gitGuis: OptionDef[];
+    editors: AppOptionDef[];
+    gitGuis: AppOptionDef[];
     browsers: AppOptionDef[];
     terminalApps: AppOptionDef[];
     terminalOpenIn: OptionDef[];
@@ -187,6 +187,13 @@ export default function SettingsPage() {
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Tools</h2>
         <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5">
           <SettingRow
+            label="Browser"
+            description="Used for opening pull request links"
+            value={data.config.browser}
+            options={data.options.browsers}
+            onChange={(browser) => save({ browser })}
+          />
+          <SettingRow
             label="Code Editor"
             description="Opens when you click the editor button on a session card"
             value={data.config.editor}
@@ -199,13 +206,6 @@ export default function SettingsPage() {
             value={data.config.gitGui}
             options={data.options.gitGuis}
             onChange={(gitGui) => save({ gitGui })}
-          />
-          <SettingRow
-            label="Browser"
-            description="Used for opening pull request links"
-            value={data.config.browser}
-            options={data.options.browsers}
-            onChange={(browser) => save({ browser })}
           />
         </div>
       </section>

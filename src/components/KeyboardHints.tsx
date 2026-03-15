@@ -1,6 +1,7 @@
 "use client";
 
 import { ClaudeSession } from "@/lib/types";
+import { useSettings } from "@/hooks/useSettings";
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
@@ -21,6 +22,7 @@ function Hint({ keys, label }: { keys: string; label: string }) {
 
 export function KeyboardHints({ selectedSession, actionFeedback }: { selectedSession: ClaudeSession | null; actionFeedback?: { label: string; color: string } | null }) {
   const isWaiting = selectedSession?.status === "waiting" && selectedSession?.hasPendingToolUse;
+  const { editorAvailable, gitGuiAvailable } = useSettings();
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 pointer-events-none">
@@ -41,8 +43,8 @@ export function KeyboardHints({ selectedSession, actionFeedback }: { selectedSes
                 <>
                   <span className="w-px h-3 bg-zinc-800" />
                   <Hint keys="Enter" label="terminal" />
-                  <Hint keys="E" label="editor" />
-                  <Hint keys="G" label="git" />
+                  {editorAvailable && <Hint keys="E" label="editor" />}
+                  {gitGuiAvailable && <Hint keys="G" label="git" />}
                   <Hint keys="F" label="finder" />
                   {selectedSession.prUrl && <Hint keys="P" label="PR" />}
                   {isWaiting && (

@@ -4,6 +4,7 @@ import { useEffect, useCallback, useState, useMemo } from "react";
 import { ClaudeSession } from "@/lib/types";
 import { flattenGroupedSessions } from "@/lib/group-sessions";
 import { sendKeystrokeAction } from "@/lib/actions";
+import { useSettings } from "./useSettings";
 
 interface UseKeyboardShortcutsOptions {
   sessions: ClaudeSession[];
@@ -16,6 +17,7 @@ interface UseKeyboardShortcutsOptions {
 export function useKeyboardShortcuts({ sessions, targetScreen, onNewGlobal, onNewInRepo, onApproveReject }: UseKeyboardShortcutsOptions) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ label: string; color: string } | null>(null);
+  const { editorAvailable, gitGuiAvailable } = useSettings();
 
   // Use the same grouped+flattened order as the grid renders
   const orderedSessions = useMemo(() => flattenGroupedSessions(sessions), [sessions]);
@@ -154,14 +156,18 @@ export function useKeyboardShortcuts({ sessions, targetScreen, onNewGlobal, onNe
           }
           break;
         case "e":
-          e.preventDefault();
-          openAction("editor", selectedSession);
-          flash("Editor");
+          if (editorAvailable) {
+            e.preventDefault();
+            openAction("editor", selectedSession);
+            flash("Editor");
+          }
           break;
         case "g":
-          e.preventDefault();
-          openAction("git-gui", selectedSession);
-          flash("Git GUI");
+          if (gitGuiAvailable) {
+            e.preventDefault();
+            openAction("git-gui", selectedSession);
+            flash("Git GUI");
+          }
           break;
         case "f":
           e.preventDefault();
@@ -200,7 +206,7 @@ export function useKeyboardShortcuts({ sessions, targetScreen, onNewGlobal, onNe
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [orderedSessions, selectedSession, openAction, sendKeystroke, flash, onNewGlobal, onNewInRepo, onApproveReject]);
+  }, [orderedSessions, selectedSession, openAction, sendKeystroke, flash, onNewGlobal, onNewInRepo, onApproveReject, editorAvailable, gitGuiAvailable]);
 
   return { selectedIndex, setSelectedIndex, selectedSession, actionFeedback };
 }

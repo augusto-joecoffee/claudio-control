@@ -20,15 +20,17 @@ export interface AppConfig {
 }
 
 export const EDITOR_OPTIONS = [
-  { id: "vscode", label: "VS Code", command: "code", appName: "Code" },
-  { id: "cursor", label: "Cursor", command: "cursor", appName: "Cursor" },
-  { id: "zed", label: "Zed", command: "zed", appName: "Zed" },
-  { id: "sublime", label: "Sublime Text", command: "subl", appName: "Sublime Text" },
-  { id: "webstorm", label: "WebStorm", command: "webstorm", appName: "WebStorm" },
-  { id: "intellij", label: "IntelliJ IDEA", command: "idea", appName: "IntelliJ IDEA" },
+  { id: "none", label: "None", command: "", appName: "", processName: "" },
+  { id: "vscode", label: "VS Code", command: "code", appName: "Visual Studio Code", processName: "Code" },
+  { id: "cursor", label: "Cursor", command: "cursor", appName: "Cursor", processName: "Cursor" },
+  { id: "zed", label: "Zed", command: "zed", appName: "Zed", processName: "Zed" },
+  { id: "sublime", label: "Sublime Text", command: "subl", appName: "Sublime Text", processName: "Sublime Text" },
+  { id: "webstorm", label: "WebStorm", command: "webstorm", appName: "WebStorm", processName: "WebStorm" },
+  { id: "intellij", label: "IntelliJ IDEA", command: "idea", appName: "IntelliJ IDEA", processName: "IntelliJ IDEA" },
 ];
 
 export const GIT_GUI_OPTIONS = [
+  { id: "none", label: "None", appName: "" },
   { id: "fork", label: "Fork", appName: "Fork" },
   { id: "sublime-merge", label: "Sublime Merge", appName: "Sublime Merge" },
   { id: "gitkraken", label: "GitKraken", appName: "GitKraken" },
@@ -37,17 +39,17 @@ export const GIT_GUI_OPTIONS = [
 ];
 
 export const BROWSER_OPTIONS = [
+  { id: "safari", label: "Safari", appName: "Safari" },
   { id: "chrome", label: "Google Chrome", appName: "Google Chrome" },
   { id: "arc", label: "Arc", appName: "Arc" },
-  { id: "safari", label: "Safari", appName: "Safari" },
   { id: "firefox", label: "Firefox", appName: "Firefox" },
   { id: "brave", label: "Brave", appName: "Brave Browser" },
   { id: "edge", label: "Microsoft Edge", appName: "Microsoft Edge" },
 ];
 
 export const TERMINAL_APP_OPTIONS = [
-  { id: "iterm", label: "iTerm2", appName: "iTerm" },
   { id: "terminal-app", label: "Terminal", appName: "Terminal" },
+  { id: "iterm", label: "iTerm2", appName: "iTerm" },
   { id: "ghostty", label: "Ghostty", appName: "Ghostty" },
   { id: "kitty", label: "kitty", appName: "kitty" },
   { id: "wezterm", label: "WezTerm", appName: "WezTerm" },

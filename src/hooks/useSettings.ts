@@ -1,20 +1,40 @@
 import useSWR from "swr";
 
-interface SettingsConfig {
-  notifications: boolean;
-  notificationSound: boolean;
+interface AppOption {
+  id: string;
+  installed: boolean;
+}
+
+interface SettingsResponse {
+  config: {
+    notifications: boolean;
+    notificationSound: boolean;
+    editor: string;
+    gitGui: string;
+  };
+  options: {
+    editors: AppOption[];
+    gitGuis: AppOption[];
+  };
 }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
+function isAppAvailable(options: AppOption[] | undefined, selectedId: string | undefined): boolean {
+  if (!options || !selectedId || selectedId === "none") return false;
+  return options.find((o) => o.id === selectedId)?.installed ?? false;
+}
+
 export function useSettings() {
-  const { data } = useSWR<{ config: SettingsConfig }>("/api/settings", fetcher, {
+  const { data } = useSWR<SettingsResponse>("/api/settings", fetcher, {
     revalidateOnFocus: false,
-    refreshInterval: 0, // Only fetch once, revalidate on mutation
+    refreshInterval: 0,
   });
 
   return {
     notifications: data?.config?.notifications ?? true,
     notificationSound: data?.config?.notificationSound ?? true,
+    editorAvailable: isAppAvailable(data?.options?.editors, data?.config?.editor),
+    gitGuiAvailable: isAppAvailable(data?.options?.gitGuis, data?.config?.gitGui),
   };
 }

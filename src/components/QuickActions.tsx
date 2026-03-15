@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSettings } from "@/hooks/useSettings";
 
 const iconBtnClass =
   "flex items-center justify-center h-8 rounded-lg bg-white/[0.04] hover:bg-white/[0.10] border border-white/[0.07] hover:border-white/[0.15] text-zinc-500 hover:text-zinc-200 transition-all duration-150";
@@ -45,6 +46,7 @@ export function QuickActions({
   onCleanup?: (e: React.MouseEvent) => void;
 }) {
   const [prSending, setPrSending] = useState(false);
+  const { editorAvailable, gitGuiAvailable } = useSettings();
 
   const openAction = async (e: React.MouseEvent, action: string) => {
     e.preventDefault();
@@ -137,16 +139,20 @@ export function QuickActions({
           </svg>
         </IconButton>
       )}
-      <IconButton onClick={(e) => openAction(e, "editor")} tip="Editor" className={`flex-1 ${iconBtnClass}`}>
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
-        </svg>
-      </IconButton>
-      <IconButton onClick={(e) => openAction(e, "git-gui")} tip="Git GUI" className={`flex-1 ${iconBtnClass}`}>
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 3v12m0 0a3 3 0 103 3H15a3 3 0 100-3H9a3 3 0 01-3-3zm0 0a3 3 0 103-3 3 3 0 00-3 3z" />
-        </svg>
-      </IconButton>
+      {editorAvailable && (
+        <IconButton onClick={(e) => openAction(e, "editor")} tip="Editor" className={`flex-1 ${iconBtnClass}`}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+          </svg>
+        </IconButton>
+      )}
+      {gitGuiAvailable && (
+        <IconButton onClick={(e) => openAction(e, "git-gui")} tip="Git GUI" className={`flex-1 ${iconBtnClass}`}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 3v12m0 0a3 3 0 103 3H15a3 3 0 100-3H9a3 3 0 01-3-3zm0 0a3 3 0 103-3 3 3 0 00-3 3z" />
+          </svg>
+        </IconButton>
+      )}
       <IconButton onClick={(e) => openAction(e, "finder")} tip="Finder" className={`flex-1 ${iconBtnClass}`}>
         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
