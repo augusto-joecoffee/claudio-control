@@ -78,6 +78,8 @@ The development server runs on port 3200. The Electron shell loads it automatica
 | `npm run electron:pack` | Production build → unpacked app in `dist/` |
 | `npm run dev` | Next.js dev server only (no Electron shell) |
 | `npm run build` | Next.js production build only |
+| `npm run test` | Run unit tests (Vitest) |
+| `npm run test:watch` | Run tests in watch mode |
 | `npm run lint` | Run ESLint |
 | `npm run typecheck` | Run TypeScript type checking |
 
