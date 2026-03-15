@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { stat } from "fs/promises";
+import { loadConfig } from "@/lib/config";
+import { createSession } from "@/lib/terminal";
 
 const execFileAsync = promisify(execFile);
 
@@ -10,6 +12,7 @@ interface CreateRequest {
   branchName?: string;
   baseBranch?: string;
   prompt?: string;
+  tmuxSession?: string;
 }
 
 async function createWorktree(repoPath: string, branchName: string, baseBranch?: string): Promise<string> {
@@ -43,38 +46,45 @@ async function createWorktree(repoPath: string, branchName: string, baseBranch?:
   return worktreePath;
 }
 
-async function openItermWithClaude(cwd: string, prompt?: string): Promise<void> {
-  // Build the shell command, then escape the whole thing for AppleScript string context.
-  // In AppleScript, \" is an escaped double quote inside a string.
-  let shellCommand = `cd "${cwd}" && claude`;
-  if (prompt) {
-    // Use single quotes for the prompt in shell to avoid escaping issues
-    // Escape any single quotes in the prompt: ' → '\''
-    const escaped = prompt.replace(/'/g, "'\\''");
-    shellCommand += ` '${escaped}'`;
+function projectNameFromPath(repoPath: string): string {
+  return repoPath.split("/").filter(Boolean).pop() || "claude";
+}
+
+async function openTerminalWithClaude(
+  cwd: string,
+  repoPath: string,
+  prompt?: string,
+  tmuxSessionOverride?: string,
+): Promise<void> {
+  const config = await loadConfig();
+
+  // Determine tmux session name:
+  // - explicit override from UI (choose mode) takes priority
+  // - "per-project" mode uses the project name
+  // - otherwise no named session
+  let tmuxSession: string | undefined;
+  if (config.terminalUseTmux) {
+    if (tmuxSessionOverride) {
+      tmuxSession = tmuxSessionOverride;
+    } else if (config.terminalTmuxMode === "per-project") {
+      tmuxSession = projectNameFromPath(repoPath);
+    }
   }
 
-  // Escape for AppleScript string: backslash → \\, double quote → \"
-  const asEscaped = shellCommand.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-
-  const script = `
-tell application "iTerm"
-  activate
-  tell current window
-    set newTab to (create tab with default profile)
-    tell current session of newTab
-      write text "${asEscaped}"
-    end tell
-  end tell
-end tell`;
-
-  await execFileAsync("osascript", ["-e", script], { timeout: 10000 });
+  await createSession({
+    terminalApp: config.terminalApp,
+    openIn: config.terminalOpenIn,
+    useTmux: config.terminalUseTmux,
+    tmuxSession,
+    cwd,
+    prompt,
+  });
 }
 
 export async function POST(request: Request) {
   try {
     const body: CreateRequest = await request.json();
-    const { repoPath, branchName, baseBranch, prompt } = body;
+    const { repoPath, branchName, baseBranch, prompt, tmuxSession } = body;
 
     if (!repoPath) {
       return NextResponse.json({ error: "Missing repoPath" }, { status: 400 });
@@ -99,8 +109,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Open iTerm with claude in the target directory
-    await openItermWithClaude(targetPath, prompt);
+    // Open terminal with claude in the target directory
+    await openTerminalWithClaude(targetPath, repoPath, prompt, tmuxSession);
 
     return NextResponse.json({ ok: true, path: targetPath });
   } catch (error: unknown) {

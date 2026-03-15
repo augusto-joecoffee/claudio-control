@@ -9,6 +9,10 @@ interface OptionDef {
   label: string;
 }
 
+interface AppOptionDef extends OptionDef {
+  installed: boolean;
+}
+
 interface SettingsData {
   config: {
     codeDirectories: string[];
@@ -17,11 +21,18 @@ interface SettingsData {
     browser: string;
     notifications: boolean;
     notificationSound: boolean;
+    terminalApp: string;
+    terminalOpenIn: string;
+    terminalUseTmux: boolean;
+    terminalTmuxMode: string;
   };
   options: {
-    editors: OptionDef[];
-    gitGuis: OptionDef[];
-    browsers: OptionDef[];
+    editors: AppOptionDef[];
+    gitGuis: AppOptionDef[];
+    browsers: AppOptionDef[];
+    terminalApps: AppOptionDef[];
+    terminalOpenIn: OptionDef[];
+    terminalTmuxModes: OptionDef[];
   };
 }
 
@@ -42,7 +53,7 @@ function Toggle({ enabled, onChange, label, description }: { enabled: boolean; o
   );
 }
 
-function SettingRow({
+function SettingRow<T extends OptionDef>({
   label,
   description,
   value,
@@ -52,7 +63,7 @@ function SettingRow({
   label: string;
   description: string;
   value: string;
-  options: OptionDef[];
+  options: T[];
   onChange: (val: string) => void;
 }) {
   return (
@@ -66,11 +77,14 @@ function SettingRow({
         onChange={(e) => onChange(e.target.value)}
         className="bg-zinc-900 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-zinc-600 min-w-[180px]"
       >
-        {options.map((opt) => (
-          <option key={opt.id} value={opt.id}>
-            {opt.label}
-          </option>
-        ))}
+        {options.map((opt) => {
+          const installed = "installed" in opt ? (opt as AppOptionDef).installed : true;
+          return (
+            <option key={opt.id} value={opt.id} disabled={!installed}>
+              {opt.label}{!installed ? " (not installed)" : ""}
+            </option>
+          );
+        })}
       </select>
     </div>
   );
@@ -98,7 +112,7 @@ export default function SettingsPage() {
     if (!data) return;
     const newConfig = { ...data.config, ...updates };
     setData({ ...data, config: newConfig });
-        try {
+    try {
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -173,6 +187,13 @@ export default function SettingsPage() {
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Tools</h2>
         <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5">
           <SettingRow
+            label="Browser"
+            description="Used for opening pull request links"
+            value={data.config.browser}
+            options={data.options.browsers}
+            onChange={(browser) => save({ browser })}
+          />
+          <SettingRow
             label="Code Editor"
             description="Opens when you click the editor button on a session card"
             value={data.config.editor}
@@ -186,13 +207,42 @@ export default function SettingsPage() {
             options={data.options.gitGuis}
             onChange={(gitGui) => save({ gitGui })}
           />
+        </div>
+      </section>
+
+      {/* Terminal section */}
+      <section className="mb-10">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Terminal</h2>
+        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5">
           <SettingRow
-            label="Browser"
-            description="Used for opening pull request links"
-            value={data.config.browser}
-            options={data.options.browsers}
-            onChange={(browser) => save({ browser })}
+            label="Terminal App"
+            description="Which terminal to use for focusing sessions and creating new ones"
+            value={data.config.terminalApp}
+            options={data.options.terminalApps}
+            onChange={(terminalApp) => save({ terminalApp })}
           />
+          <SettingRow
+            label="Open In"
+            description="Open new sessions in a tab or window"
+            value={data.config.terminalOpenIn}
+            options={data.options.terminalOpenIn}
+            onChange={(terminalOpenIn) => save({ terminalOpenIn })}
+          />
+          <Toggle
+            label="Use tmux"
+            description="Run claude sessions inside tmux for background operation and send-keys support"
+            enabled={data.config.terminalUseTmux ?? false}
+            onChange={(terminalUseTmux) => save({ terminalUseTmux })}
+          />
+          {data.config.terminalUseTmux && (
+            <SettingRow
+              label="Tmux Session"
+              description="Group by project name automatically, or pick a session each time"
+              value={data.config.terminalTmuxMode ?? "per-project"}
+              options={data.options.terminalTmuxModes}
+              onChange={(terminalTmuxMode) => save({ terminalTmuxMode })}
+            />
+          )}
         </div>
       </section>
 
@@ -204,13 +254,13 @@ export default function SettingsPage() {
             label="Desktop Notifications"
             description="Show a macOS notification when a session finishes working"
             enabled={data.config.notifications ?? true}
-            onChange={(notifications) => save({ notifications } as Partial<SettingsData["config"]>)}
+            onChange={(notifications) => save({ notifications })}
           />
           <Toggle
             label="Notification Sound"
             description="Play a chime when a session finishes working"
             enabled={data.config.notificationSound ?? true}
-            onChange={(notificationSound) => save({ notificationSound } as Partial<SettingsData["config"]>)}
+            onChange={(notificationSound) => save({ notificationSound })}
           />
         </div>
       </section>

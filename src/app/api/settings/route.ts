@@ -1,17 +1,63 @@
 import { NextResponse } from "next/server";
-import { loadConfig, saveConfig, AppConfig, EDITOR_OPTIONS, GIT_GUI_OPTIONS, BROWSER_OPTIONS } from "@/lib/config";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import {
+  loadConfig,
+  saveConfig,
+  AppConfig,
+  EDITOR_OPTIONS,
+  GIT_GUI_OPTIONS,
+  BROWSER_OPTIONS,
+  TERMINAL_APP_OPTIONS,
+  TERMINAL_OPEN_IN_OPTIONS,
+  TERMINAL_TMUX_MODE_OPTIONS,
+} from "@/lib/config";
+
+const execFileAsync = promisify(execFile);
 
 export const dynamic = "force-dynamic";
 
+async function checkInstalledApps<T extends { appName: string; command?: string }>(
+  options: T[],
+  alwaysInstalled?: Set<string>,
+): Promise<(T & { installed: boolean })[]> {
+  return Promise.all(
+    options.map(async (opt) => {
+      if (!opt.appName || alwaysInstalled?.has(opt.appName)) return { ...opt, installed: true };
+      // Try macOS app bundle first, then CLI command as fallback
+      const checks = [
+        execFileAsync("open", ["-Ra", opt.appName], { timeout: 3000 }).then(() => true, () => false),
+      ];
+      if (opt.command) {
+        checks.push(
+          execFileAsync("which", [opt.command], { timeout: 3000 }).then(() => true, () => false),
+        );
+      }
+      const results = await Promise.all(checks);
+      return { ...opt, installed: results.some(Boolean) };
+    })
+  );
+}
+
 export async function GET() {
   try {
-    const config = await loadConfig();
+    const [config, terminalApps, browsers, editors, gitGuis] = await Promise.all([
+      loadConfig(),
+      checkInstalledApps(TERMINAL_APP_OPTIONS, new Set(["Terminal"])),
+      checkInstalledApps(BROWSER_OPTIONS, new Set(["Safari"])),
+      checkInstalledApps(EDITOR_OPTIONS),
+      checkInstalledApps(GIT_GUI_OPTIONS),
+    ]);
+
     return NextResponse.json({
       config,
       options: {
-        editors: EDITOR_OPTIONS,
-        gitGuis: GIT_GUI_OPTIONS,
-        browsers: BROWSER_OPTIONS,
+        editors,
+        gitGuis,
+        browsers,
+        terminalApps,
+        terminalOpenIn: TERMINAL_OPEN_IN_OPTIONS,
+        terminalTmuxModes: TERMINAL_TMUX_MODE_OPTIONS,
       },
     });
   } catch (error) {
@@ -32,6 +78,10 @@ export async function PUT(request: Request) {
       browser: body.browser ?? current.browser,
       notifications: body.notifications ?? current.notifications,
       notificationSound: body.notificationSound ?? current.notificationSound,
+      terminalApp: body.terminalApp ?? current.terminalApp,
+      terminalOpenIn: body.terminalOpenIn ?? current.terminalOpenIn,
+      terminalUseTmux: body.terminalUseTmux ?? current.terminalUseTmux,
+      terminalTmuxMode: body.terminalTmuxMode ?? current.terminalTmuxMode,
     };
 
     await saveConfig(updated);
