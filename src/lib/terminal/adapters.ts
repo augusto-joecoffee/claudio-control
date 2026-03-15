@@ -1,7 +1,6 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import type { TerminalInfo, TerminalApp } from "./types";
-import { getTerminalAppName } from "./detect";
 
 const execFileAsync = promisify(execFile);
 
@@ -255,29 +254,44 @@ export interface CreateSessionOpts {
   terminalApp: TerminalApp;
   openIn: "tab" | "window";
   useTmux: boolean;
-  tmuxSession?: string; // existing session name to attach a new window to
+  tmuxSession?: string; // session name to create or add a window to
   cwd: string;
-  command: string; // e.g. "claude" or "claude 'some prompt'"
+  prompt?: string; // initial prompt for claude (raw, unescaped)
+}
+
+function shellEscape(s: string): string {
+  return s.replace(/'/g, "'\\''");
 }
 
 export async function createSession(opts: CreateSessionOpts): Promise<void> {
-  const { terminalApp, openIn, useTmux, tmuxSession, cwd, command } = opts;
-  const safeCwd = cwd.replace(/'/g, "'\\''");
+  const { terminalApp, openIn, useTmux, tmuxSession, cwd, prompt } = opts;
 
-  // Flow B: tmux + existing session → new window in that session
+  // Build the shell command with proper escaping — all user input
+  // goes through shellEscape so callers can't introduce injection
+  let command = "claude";
+  if (prompt) {
+    command += ` '${shellEscape(prompt)}'`;
+  }
+  const cmd = `cd '${shellEscape(cwd)}' && ${command}`;
+
+  // Named tmux session: try adding a window to existing session
   if (useTmux && tmuxSession) {
-    const cmd = `cd '${safeCwd}' && ${command}`;
-    await execFileAsync("tmux", ["new-window", "-t", tmuxSession, cmd], { timeout: 10000 });
-    return;
+    try {
+      await execFileAsync("tmux", ["new-window", "-t", tmuxSession, cmd], { timeout: 10000 });
+      return;
+    } catch {
+      // Session doesn't exist — fall through to open a terminal with new-session
+    }
   }
 
-  // Build the effective command: Flow C wraps in tmux, Flow A runs directly
+  // Build the effective command
   let effectiveCommand: string;
   if (useTmux) {
-    const sessionName = `claude-${Date.now().toString(36).slice(-4)}`;
-    effectiveCommand = `tmux new-session -s ${sessionName} "cd '${safeCwd}' && ${command}"`;
+    // Named session that needs creating, or unnamed fallback
+    const sessionName = tmuxSession || `claude-${Date.now().toString(36).slice(-4)}`;
+    effectiveCommand = `tmux new-session -s '${shellEscape(sessionName)}' '${shellEscape(cmd)}'`;
   } else {
-    effectiveCommand = `cd '${safeCwd}' && ${command}`;
+    effectiveCommand = cmd;
   }
 
   switch (terminalApp) {
@@ -316,13 +330,17 @@ end tell`;
     }
 
     case "ghostty":
-    case "kitty":
-    case "wezterm":
-    case "alacritty": {
-      const appName = getTerminalAppName(terminalApp);
-      await execFileAsync("open", ["-a", appName], { timeout: 10000 });
+      await execFileAsync("ghostty", ["-e", "sh", "-c", effectiveCommand], { timeout: 10000 });
       break;
-    }
+    case "kitty":
+      await execFileAsync("kitty", ["sh", "-c", effectiveCommand], { timeout: 10000 });
+      break;
+    case "wezterm":
+      await execFileAsync("wezterm", ["start", "--", "sh", "-c", effectiveCommand], { timeout: 10000 });
+      break;
+    case "alacritty":
+      await execFileAsync("alacritty", ["-e", "sh", "-c", effectiveCommand], { timeout: 10000 });
+      break;
 
     default:
       throw new Error(`Cannot create session for unknown terminal: ${terminalApp}`);

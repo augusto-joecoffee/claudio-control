@@ -16,7 +16,7 @@ export interface AppConfig {
   terminalApp: TerminalApp;
   terminalOpenIn: TerminalOpenIn;
   terminalUseTmux: boolean;
-  terminalTmuxSession: string;
+  terminalTmuxMode: "per-project" | "choose";
 }
 
 export const EDITOR_OPTIONS = [
@@ -46,17 +46,22 @@ export const BROWSER_OPTIONS = [
 ];
 
 export const TERMINAL_APP_OPTIONS = [
-  { id: "iterm", label: "iTerm2" },
-  { id: "terminal-app", label: "Terminal" },
-  { id: "ghostty", label: "Ghostty" },
-  { id: "kitty", label: "kitty" },
-  { id: "wezterm", label: "WezTerm" },
-  { id: "alacritty", label: "Alacritty" },
+  { id: "iterm", label: "iTerm2", appName: "iTerm" },
+  { id: "terminal-app", label: "Terminal", appName: "Terminal" },
+  { id: "ghostty", label: "Ghostty", appName: "Ghostty" },
+  { id: "kitty", label: "kitty", appName: "kitty" },
+  { id: "wezterm", label: "WezTerm", appName: "WezTerm" },
+  { id: "alacritty", label: "Alacritty", appName: "Alacritty" },
 ];
 
 export const TERMINAL_OPEN_IN_OPTIONS = [
   { id: "tab", label: "New tab" },
   { id: "window", label: "New window" },
+];
+
+export const TERMINAL_TMUX_MODE_OPTIONS = [
+  { id: "per-project", label: "Session per project" },
+  { id: "choose", label: "Choose when creating" },
 ];
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -66,10 +71,10 @@ const DEFAULT_CONFIG: AppConfig = {
   browser: "chrome",
   notifications: true,
   notificationSound: true,
-  terminalApp: "iterm",
+  terminalApp: "terminal-app",
   terminalOpenIn: "tab",
   terminalUseTmux: false,
-  terminalTmuxSession: "",
+  terminalTmuxMode: "per-project",
 };
 
 export async function loadConfig(): Promise<AppConfig> {

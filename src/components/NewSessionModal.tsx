@@ -8,6 +8,17 @@ interface RepoInfo {
   isGitRepo: boolean;
 }
 
+interface TmuxSession {
+  name: string;
+  windows: number;
+  attached: boolean;
+}
+
+interface TerminalConfig {
+  terminalUseTmux: boolean;
+  terminalTmuxMode: "per-project" | "choose";
+}
+
 interface Props {
   repoPath?: string;
   repoName?: string;
@@ -29,6 +40,10 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reposLoading, setReposLoading] = useState(true);
+  const [terminalConfig, setTerminalConfig] = useState<TerminalConfig | null>(null);
+  const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
+  const [tmuxSessionsLoading, setTmuxSessionsLoading] = useState(false);
+  const [selectedTmuxSession, setSelectedTmuxSession] = useState<string>("");
   const branchRef = useRef<HTMLInputElement>(null);
   const isRepoMode = !repoPath;
 
@@ -62,6 +77,30 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
       setTimeout(() => branchRef.current?.focus(), 100);
     }
   }, [isRepoMode]);
+
+  // Fetch terminal config to determine if tmux picker should show
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        const cfg: TerminalConfig = {
+          terminalUseTmux: data.config?.terminalUseTmux ?? false,
+          terminalTmuxMode: data.config?.terminalTmuxMode ?? "per-project",
+        };
+        setTerminalConfig(cfg);
+
+        // If tmux enabled and mode is "choose", fetch live sessions
+        if (cfg.terminalUseTmux && cfg.terminalTmuxMode === "choose") {
+          setTmuxSessionsLoading(true);
+          fetch("/api/tmux/sessions")
+            .then((r) => r.json())
+            .then((d) => setTmuxSessions(d.sessions ?? []))
+            .catch(() => setTmuxSessions([]))
+            .finally(() => setTmuxSessionsLoading(false));
+        }
+      })
+      .catch(() => setTerminalConfig(null));
+  }, []);
 
   const filteredRepos = repos.filter(
     (r) =>
@@ -134,6 +173,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
           branchName: branchName.trim() || undefined,
           baseBranch: branchName.trim() ? baseBranch.trim() || undefined : undefined,
           prompt: prompt.trim() || undefined,
+          tmuxSession: selectedTmuxSession || (terminalConfig?.terminalUseTmux ? (repoName || selectedRepoName || undefined) : undefined),
         }),
       });
 
@@ -370,6 +410,48 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                 onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handleCreate(); }}
                 className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors resize-y min-h-[4.5rem]"
               />
+            </div>
+          )}
+
+          {/* Tmux session picker (shown when tmux enabled + "choose" mode) */}
+          {!needsSetup && terminalConfig?.terminalUseTmux && terminalConfig.terminalTmuxMode === "choose" && (
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                Tmux session
+              </label>
+              {/* Existing sessions as clickable options */}
+              {!tmuxSessionsLoading && tmuxSessions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {tmuxSessions.map((s) => (
+                    <button
+                      key={s.name}
+                      type="button"
+                      onClick={() => setSelectedTmuxSession(s.name)}
+                      className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+                        selectedTmuxSession === s.name
+                          ? "bg-blue-500/20 border-blue-500/40 text-blue-300 border"
+                          : "bg-white/[0.04] border border-white/[0.07] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.15]"
+                      }`}
+                    >
+                      {s.name}
+                      <span className="text-zinc-600 ml-1">
+                        {s.windows}w{s.attached ? " attached" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* Text input for custom/new session name */}
+              <input
+                type="text"
+                placeholder={repoName || selectedRepoName || "session name"}
+                value={selectedTmuxSession}
+                onChange={(e) => setSelectedTmuxSession(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors font-[family-name:var(--font-geist-mono)]"
+              />
+              <p className="text-[11px] text-zinc-600 mt-1">
+                Pick an existing session above or type a name. Leave empty to use project name.
+              </p>
             </div>
           )}
 

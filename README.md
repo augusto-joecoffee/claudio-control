@@ -26,7 +26,7 @@ When you're running several Claude Code instances across different repos and wor
 - **Notification sounds** — Subtle two-tone chime on status transitions (configurable)
 - **Quick actions** — One-click buttons to focus the terminal tab, open your editor, git GUI, Finder, or PR link for any session
 - **Multiple terminal support** — Works with iTerm2, Terminal.app, Ghostty, kitty, WezTerm, and Alacritty
-- **tmux integration** — Run sessions inside tmux for background operation; approve/reject without terminal focus via `send-keys`
+- **tmux integration** — Run sessions inside tmux with per-project session grouping or manual session selection; approve/reject without terminal focus via `send-keys`
 - **Configurable tools** — Choose your preferred terminal, code editor (VS Code, Cursor, Zed, etc.), git GUI (Fork, Sublime Merge, etc.), and browser (Chrome, Arc, Safari, etc.)
 - **New session creation** — Create new Claude Code sessions with git worktree support, repo browsing, and custom initial prompts
 - **PR workflow** — Send `/create-pr` to idle sessions and see PR links once created

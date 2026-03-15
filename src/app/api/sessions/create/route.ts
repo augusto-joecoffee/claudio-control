@@ -46,22 +46,38 @@ async function createWorktree(repoPath: string, branchName: string, baseBranch?:
   return worktreePath;
 }
 
-async function openTerminalWithClaude(cwd: string, prompt?: string, tmuxSessionOverride?: string): Promise<void> {
+function projectNameFromPath(repoPath: string): string {
+  return repoPath.split("/").filter(Boolean).pop() || "claude";
+}
+
+async function openTerminalWithClaude(
+  cwd: string,
+  repoPath: string,
+  prompt?: string,
+  tmuxSessionOverride?: string,
+): Promise<void> {
   const config = await loadConfig();
 
-  let command = "claude";
-  if (prompt) {
-    const escaped = prompt.replace(/'/g, "'\\''");
-    command += ` '${escaped}'`;
+  // Determine tmux session name:
+  // - explicit override from UI (choose mode) takes priority
+  // - "per-project" mode uses the project name
+  // - otherwise no named session
+  let tmuxSession: string | undefined;
+  if (config.terminalUseTmux) {
+    if (tmuxSessionOverride) {
+      tmuxSession = tmuxSessionOverride;
+    } else if (config.terminalTmuxMode === "per-project") {
+      tmuxSession = projectNameFromPath(repoPath);
+    }
   }
 
   await createSession({
     terminalApp: config.terminalApp,
     openIn: config.terminalOpenIn,
     useTmux: config.terminalUseTmux,
-    tmuxSession: tmuxSessionOverride || config.terminalTmuxSession || undefined,
+    tmuxSession,
     cwd,
-    command,
+    prompt,
   });
 }
 
@@ -94,7 +110,7 @@ export async function POST(request: Request) {
     }
 
     // Open terminal with claude in the target directory
-    await openTerminalWithClaude(targetPath, prompt, tmuxSession);
+    await openTerminalWithClaude(targetPath, repoPath, prompt, tmuxSession);
 
     return NextResponse.json({ ok: true, path: targetPath });
   } catch (error: unknown) {

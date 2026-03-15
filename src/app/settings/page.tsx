@@ -9,10 +9,8 @@ interface OptionDef {
   label: string;
 }
 
-interface TmuxSession {
-  name: string;
-  windows: number;
-  attached: boolean;
+interface AppOptionDef extends OptionDef {
+  installed: boolean;
 }
 
 interface SettingsData {
@@ -26,14 +24,15 @@ interface SettingsData {
     terminalApp: string;
     terminalOpenIn: string;
     terminalUseTmux: boolean;
-    terminalTmuxSession: string;
+    terminalTmuxMode: string;
   };
   options: {
     editors: OptionDef[];
     gitGuis: OptionDef[];
-    browsers: OptionDef[];
-    terminalApps: OptionDef[];
+    browsers: AppOptionDef[];
+    terminalApps: AppOptionDef[];
     terminalOpenIn: OptionDef[];
+    terminalTmuxModes: OptionDef[];
   };
 }
 
@@ -54,7 +53,7 @@ function Toggle({ enabled, onChange, label, description }: { enabled: boolean; o
   );
 }
 
-function SettingRow({
+function SettingRow<T extends OptionDef>({
   label,
   description,
   value,
@@ -64,7 +63,7 @@ function SettingRow({
   label: string;
   description: string;
   value: string;
-  options: OptionDef[];
+  options: T[];
   onChange: (val: string) => void;
 }) {
   return (
@@ -78,55 +77,14 @@ function SettingRow({
         onChange={(e) => onChange(e.target.value)}
         className="bg-zinc-900 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-zinc-600 min-w-[180px]"
       >
-        {options.map((opt) => (
-          <option key={opt.id} value={opt.id}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function TmuxSessionPicker({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (val: string) => void;
-}) {
-  const [sessions, setSessions] = useState<TmuxSession[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/tmux/sessions")
-      .then((r) => r.json())
-      .then((data) => setSessions(data.sessions ?? []))
-      .catch(() => setSessions([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  return (
-    <div className="flex items-center justify-between py-4 border-b border-white/[0.04]">
-      <div>
-        <h3 className="text-sm font-medium text-zinc-200">Tmux Session</h3>
-        <p className="text-xs text-zinc-500 mt-0.5">Attach new windows to an existing session, or create one each time</p>
-      </div>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="bg-zinc-900 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-zinc-600 min-w-[180px]"
-      >
-        <option value="">New session each time</option>
-        {loading ? (
-          <option disabled>Loading...</option>
-        ) : (
-          sessions.map((s) => (
-            <option key={s.name} value={s.name}>
-              {s.name} ({s.windows} win{s.windows !== 1 ? "s" : ""}{s.attached ? ", attached" : ""})
+        {options.map((opt) => {
+          const installed = "installed" in opt ? (opt as AppOptionDef).installed : true;
+          return (
+            <option key={opt.id} value={opt.id} disabled={!installed}>
+              {opt.label}{!installed ? " (not installed)" : ""}
             </option>
-          ))
-        )}
+          );
+        })}
       </select>
     </div>
   );
@@ -154,7 +112,7 @@ export default function SettingsPage() {
     if (!data) return;
     const newConfig = { ...data.config, ...updates };
     setData({ ...data, config: newConfig });
-        try {
+    try {
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -274,12 +232,15 @@ export default function SettingsPage() {
             label="Use tmux"
             description="Run claude sessions inside tmux for background operation and send-keys support"
             enabled={data.config.terminalUseTmux ?? false}
-            onChange={(terminalUseTmux) => save({ terminalUseTmux } as Partial<SettingsData["config"]>)}
+            onChange={(terminalUseTmux) => save({ terminalUseTmux })}
           />
           {data.config.terminalUseTmux && (
-            <TmuxSessionPicker
-              value={data.config.terminalTmuxSession ?? ""}
-              onChange={(terminalTmuxSession) => save({ terminalTmuxSession })}
+            <SettingRow
+              label="Tmux Session"
+              description="Group by project name automatically, or pick a session each time"
+              value={data.config.terminalTmuxMode ?? "per-project"}
+              options={data.options.terminalTmuxModes}
+              onChange={(terminalTmuxMode) => save({ terminalTmuxMode })}
             />
           )}
         </div>
@@ -293,13 +254,13 @@ export default function SettingsPage() {
             label="Desktop Notifications"
             description="Show a macOS notification when a session finishes working"
             enabled={data.config.notifications ?? true}
-            onChange={(notifications) => save({ notifications } as Partial<SettingsData["config"]>)}
+            onChange={(notifications) => save({ notifications })}
           />
           <Toggle
             label="Notification Sound"
             description="Play a chime when a session finishes working"
             enabled={data.config.notificationSound ?? true}
-            onChange={(notificationSound) => save({ notificationSound } as Partial<SettingsData["config"]>)}
+            onChange={(notificationSound) => save({ notificationSound })}
           />
         </div>
       </section>
