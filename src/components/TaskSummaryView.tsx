@@ -4,7 +4,7 @@ import { useState } from "react";
 import { TaskSummary } from "@/lib/types";
 
 export function TaskSummaryView({ task }: { task: TaskSummary }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div
