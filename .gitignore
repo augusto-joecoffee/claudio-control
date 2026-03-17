@@ -11,5 +11,9 @@ next-app-dist/
 tmp/
 .DS_Store
 
+# Environment variables
+.env
+.env*.local
+
 # Claude Code
 .claude/worktrees/
