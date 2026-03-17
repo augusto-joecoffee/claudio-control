@@ -21,7 +21,7 @@ export interface AppConfig {
   showKeyboardHints: boolean;
 }
 
-export const DEFAULT_INITIAL_PROMPT = "Read the CLAUDE.md, then use /start-linear-ticket to fetch context for the ticket referenced in the branch name and implement it. Think step-by-step: first understand the codebase and ticket requirements, then plan your approach, then implement with tests.";
+export const DEFAULT_INITIAL_PROMPT = "Implement the feature or fix referenced in the branch name. Think step-by-step: first understand the codebase and requirements, then plan your approach, then implement with tests.";
 
 export const EDITOR_OPTIONS = [
   { id: "none", label: "None", command: "", appName: "", processName: "" },
