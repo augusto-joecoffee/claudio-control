@@ -123,6 +123,9 @@ export async function POST(request: Request) {
     }
 
     const now = Date.now();
+    for (const [key, entry] of cache) {
+      if (now - entry.ts > CACHE_TTL_MS) cache.delete(key);
+    }
     const results: Record<string, PrStatus | null> = {};
 
     const fetches = prUrls.map(async (url, i) => {
