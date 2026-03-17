@@ -73,6 +73,11 @@ export function QuickActions({
     if (!pid) return;
     setPrSending(true);
     try {
+      // Load the configured create-PR prompt
+      const settingsRes = await fetch("/api/settings");
+      const settings = await settingsRes.json();
+      const message = settings.config?.createPrPrompt || "/create-pr";
+
       await fetch("/api/actions/open", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -80,7 +85,7 @@ export function QuickActions({
           action: "send-message",
           path,
           pid,
-          message: "/create-pr",
+          message,
         }),
       });
     } catch (err) {

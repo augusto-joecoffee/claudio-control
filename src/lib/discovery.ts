@@ -87,7 +87,8 @@ async function buildSession(info: ProcessInfo): Promise<ClaudeSession | null> {
   }
 
   const resolvedBranch = git?.branch ?? branch;
-  const prUrl = resolvedBranch ? await getPrUrl(info.workingDirectory, resolvedBranch) : null;
+  const skipPrLookup = !resolvedBranch || resolvedBranch === "main" || resolvedBranch === "master";
+  const prUrl = skipPrLookup ? null : await getPrUrl(info.workingDirectory, resolvedBranch);
 
   const isWorktree = mainWorktreePath !== null && mainWorktreePath !== info.workingDirectory;
   const parentRepo = isWorktree ? mainWorktreePath : null;

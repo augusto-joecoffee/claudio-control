@@ -26,6 +26,7 @@ interface SettingsData {
     terminalUseTmux: boolean;
     terminalTmuxMode: string;
     initialPrompt: string;
+    createPrPrompt: string;
     showKeyboardHints: boolean;
   };
   options: {
@@ -98,7 +99,9 @@ export default function SettingsPage() {
   const [addingDir, setAddingDir] = useState(false);
   const [targetScreen, setTargetScreen] = useState<number | null>(null);
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
+  const [prPromptDraft, setPrPromptDraft] = useState<string | null>(null);
   const promptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const s = localStorage.getItem("targetScreen");
@@ -111,6 +114,7 @@ export default function SettingsPage() {
       .then((d: SettingsData) => {
         setData(d);
         setPromptDraft(d.config.initialPrompt ?? "");
+        setPrPromptDraft(d.config.createPrPrompt ?? "");
       })
       .catch(console.error);
   }, []);
@@ -143,10 +147,20 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // Flush pending prompt save on unmount
+  const savePrPromptDebounced = useCallback((value: string) => {
+    setPrPromptDraft(value);
+    if (prPromptTimerRef.current) clearTimeout(prPromptTimerRef.current);
+    prPromptTimerRef.current = setTimeout(() => {
+      save({ createPrPrompt: value });
+    }, 500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  // Flush pending prompt saves on unmount
   useEffect(() => {
     return () => {
       if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
+      if (prPromptTimerRef.current) clearTimeout(prPromptTimerRef.current);
     };
   }, []);
 
@@ -320,7 +334,7 @@ export default function SettingsPage() {
       {/* Session defaults section */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Session Defaults</h2>
-        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5 py-4">
+        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5 py-4 space-y-5">
           <div>
             <h3 className="text-sm font-medium text-zinc-200">Initial Prompt</h3>
             <p className="text-xs text-zinc-500 mt-0.5 mb-2">Default prompt used when creating new sessions with a branch name</p>
@@ -330,6 +344,17 @@ export default function SettingsPage() {
               onChange={(e) => savePromptDebounced(e.target.value)}
               placeholder="e.g. Read the CLAUDE.md and implement the ticket..."
               className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors resize-y min-h-[5rem]"
+            />
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-zinc-200">Create PR Prompt</h3>
+            <p className="text-xs text-zinc-500 mt-0.5 mb-2">Message sent to Claude when you click the PR button on a session card</p>
+            <textarea
+              rows={3}
+              value={prPromptDraft ?? ""}
+              onChange={(e) => savePrPromptDebounced(e.target.value)}
+              placeholder="e.g. /create-pr or a natural language instruction"
+              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors resize-y min-h-[4rem]"
             />
           </div>
         </div>

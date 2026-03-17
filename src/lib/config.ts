@@ -18,10 +18,13 @@ export interface AppConfig {
   terminalUseTmux: boolean;
   terminalTmuxMode: "per-project" | "choose";
   initialPrompt: string;
+  createPrPrompt: string;
   showKeyboardHints: boolean;
 }
 
 export const DEFAULT_INITIAL_PROMPT = "Implement the feature or fix referenced in the branch name. Think step-by-step: first understand the codebase and requirements, then plan your approach, then implement with tests.";
+
+export const DEFAULT_CREATE_PR_PROMPT = "Please commit all your changes with a descriptive commit message, push the branch to origin, and create a pull request. Include a clear title and description of what changed and why.";
 
 export const EDITOR_OPTIONS = [
   { id: "none", label: "None", command: "", appName: "", processName: "" },
@@ -82,6 +85,7 @@ const DEFAULT_CONFIG: AppConfig = {
   terminalUseTmux: false,
   terminalTmuxMode: "per-project",
   initialPrompt: DEFAULT_INITIAL_PROMPT,
+  createPrPrompt: DEFAULT_CREATE_PR_PROMPT,
   showKeyboardHints: true,
 };
 
