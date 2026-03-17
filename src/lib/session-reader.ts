@@ -1,6 +1,14 @@
 import { readFile, stat, open } from "fs/promises";
 import { ConversationMessage, ConversationPreview, TaskSummary, ToolInfo } from "./types";
-import { JSONL_TAIL_LINES } from "./constants";
+import {
+  JSONL_TAIL_LINES,
+  JSONL_HEAD_LINES,
+  HEAD_CHUNK_BYTES_PER_LINE,
+  TAIL_CHUNK_BYTES_PER_LINE,
+  PREVIEW_TEXT_MAX_LENGTH,
+  TASK_TITLE_MAX_LENGTH,
+  TASK_DESCRIPTION_MAX_LENGTH,
+} from "./constants";
 
 interface JsonlLine {
   type: string;
@@ -25,9 +33,9 @@ export async function getJsonlMtime(jsonlPath: string): Promise<Date | null> {
   }
 }
 
-export async function readJsonlHead(jsonlPath: string, lines = 30): Promise<JsonlLine[]> {
+export async function readJsonlHead(jsonlPath: string, lines = JSONL_HEAD_LINES): Promise<JsonlLine[]> {
   try {
-    const chunkSize = lines * 2048;
+    const chunkSize = lines * HEAD_CHUNK_BYTES_PER_LINE;
     const fh = await open(jsonlPath, "r");
     try {
       const buf = Buffer.alloc(Math.min(chunkSize, (await fh.stat()).size));
@@ -57,7 +65,7 @@ export async function readJsonlTail(jsonlPath: string, lines = JSONL_TAIL_LINES)
     const fh = await open(jsonlPath, "r");
     try {
       const fileSize = (await fh.stat()).size;
-      const chunkSize = Math.min(lines * 10240, fileSize);
+      const chunkSize = Math.min(lines * TAIL_CHUNK_BYTES_PER_LINE, fileSize);
       const offset = Math.max(0, fileSize - chunkSize);
       const buf = Buffer.alloc(chunkSize);
       const { bytesRead } = await fh.read(buf, 0, chunkSize, offset);
@@ -162,7 +170,7 @@ function summarizeToolInput(name: string, input?: Record<string, unknown>): stri
   if (!input) return null;
   switch (name) {
     case "Bash":
-      return typeof input.command === "string" ? input.command : null;
+      return typeof input.command === "string" ? input.command.slice(0, PREVIEW_TEXT_MAX_LENGTH) : null;
     case "Edit":
     case "Read":
     case "Write":
@@ -174,11 +182,11 @@ function summarizeToolInput(name: string, input?: Record<string, unknown>): stri
     case "Skill":
       return typeof input.skill === "string" ? input.skill : null;
     case "Agent":
-      return typeof input.description === "string" ? input.description : (typeof input.prompt === "string" ? input.prompt : null);
+      return typeof input.description === "string" ? input.description : (typeof input.prompt === "string" ? input.prompt.slice(0, PREVIEW_TEXT_MAX_LENGTH) : null);
     default: {
       // Fallback: show the first short string value from the input
       for (const val of Object.values(input)) {
-        if (typeof val === "string" && val.length > 0 && val.length <= 200) {
+        if (typeof val === "string" && val.length > 0 && val.length <= PREVIEW_TEXT_MAX_LENGTH) {
           return val;
         }
       }
@@ -213,17 +221,16 @@ export function extractPreview(lines: JsonlLine[]): ConversationPreview {
 
       // Skip pure system-injected messages (XML tags)
       if (isSystemMessage(text)) {
-        // Try to extract meaningful content from mixed messages
         const cleaned = stripXmlTags(text);
         if (cleaned) {
-          lastUserMessage = cleaned.slice(0, 200);
+          lastUserMessage = cleaned.slice(0, PREVIEW_TEXT_MAX_LENGTH);
           assistantIsNewer = false;
           messageCount++;
         }
         continue;
       }
 
-      lastUserMessage = text.slice(0, 200);
+      lastUserMessage = text.slice(0, PREVIEW_TEXT_MAX_LENGTH);
       assistantIsNewer = false;
       messageCount++;
     } else if (line.type === "assistant" && Array.isArray(line.message.content)) {
@@ -231,7 +238,7 @@ export function extractPreview(lines: JsonlLine[]): ConversationPreview {
       const turnTools: ToolInfo[] = [];
       for (const block of line.message.content) {
         if (block.type === "text" && block.text) {
-          lastAssistantText = block.text.slice(0, 200);
+          lastAssistantText = block.text.slice(0, PREVIEW_TEXT_MAX_LENGTH);
         }
         if (block.type === "tool_use" && block.name) {
           turnTools.push({
@@ -467,9 +474,9 @@ export function extractTaskSummary(headLines: JsonlLine[]): TaskSummary | null {
 
     const textLines = text.split("\n").filter((l: string) => l.trim());
     const rawTitle = textLines[0].replace(/^#+\s*/, "");
-    const title = rawTitle.length > 120 ? rawTitle.slice(0, 117) + "..." : rawTitle;
+    const title = rawTitle.length > TASK_TITLE_MAX_LENGTH ? rawTitle.slice(0, TASK_TITLE_MAX_LENGTH - 3) + "..." : rawTitle;
     const rawDesc = textLines.length > 1 ? textLines.slice(1).join(" ") : null;
-    const description = rawDesc ? (rawDesc.length > 300 ? rawDesc.slice(0, 297) + "..." : rawDesc) : null;
+    const description = rawDesc ? (rawDesc.length > TASK_DESCRIPTION_MAX_LENGTH ? rawDesc.slice(0, TASK_DESCRIPTION_MAX_LENGTH - 3) + "..." : rawDesc) : null;
 
     return {
       title,
