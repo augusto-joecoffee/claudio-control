@@ -14,8 +14,8 @@ When you're running several Claude Code instances across different repos and wor
 
 ## Features
 
-- **Auto-discovery** — Detects all running `claude` CLI processes via the process table and maps them to their JSONL conversation logs
-- **Live status** — Classifies each session as Working, Idle, Waiting (needs input), Errored, or Finished based on CPU usage, file modification times, and conversation state
+- **Auto-discovery** — Detects all running `claude` CLI processes via the process table, uses hook events for authoritative PID-to-JSONL mapping with mtime-based fallback
+- **Live status** — Classifies each session as Working, Idle, Waiting (needs input), Errored, or Finished using real-time hook events from Claude Code, with CPU/JSONL heuristic fallback
 - **Git integration** — Shows branch name, changed files, additions/deletions, and detects open pull requests via `gh`
 - **PR status badges** — Live CI check rollup (passing/failing/pending), review decision, unresolved threads, merge conflicts, and merged/closed state
 - **Task context** — Extracts Linear issue titles and descriptions from MCP tool results to show what each session is working on
@@ -88,15 +88,29 @@ The development server runs on port 3200. The Electron shell loads it automatica
 1. Finds all processes named `claude` via `ps`
 2. Filters out Claude Desktop (only CLI instances)
 3. Gets each process's working directory via `lsof`
-4. Maps the working directory to `~/.claude/projects/<escaped-path>/` to find conversation JSONL files
-5. Reads the tail of each JSONL file to extract session state
+4. Reads hook event files (`~/.claude-control/events/<pid>.json`) for authoritative PID→JSONL mapping and session status
+5. Falls back to mtime-based JSONL discovery for sessions without hook events
+6. Reads the tail of each JSONL file to extract conversation preview and task context
+
+Hook events are installed automatically into `~/.claude/settings.json` on first launch. Each Claude process writes its status, session ID, and transcript path to a `<pid>.json` file on every lifecycle event.
 
 ### Status classification
+
+**Primary (hook events):**
+
+| Status | Hook Event |
+|---|---|
+| **Working** | `UserPromptSubmit`, `SubagentStart`, `PostToolUseFailure` |
+| **Waiting** | `PermissionRequest` (overridden to Working if CPU > 15%) |
+| **Idle** | `SessionStart`, `Stop` |
+| **Finished** | `SessionEnd` |
+
+**Fallback (heuristic, when hooks unavailable):**
 
 | Status | Condition |
 |---|---|
 | **Working** | JSONL modified recently AND CPU > 5%, or CPU > 15% |
-| **Waiting** | Last assistant message has a pending tool use (permission prompt) or is asking for user input |
+| **Waiting** | Pending tool use (after 3s settle) or asking for user input |
 | **Idle** | Process alive, low activity |
 | **Errored** | Last message contains error indicators |
 | **Finished** | Process no longer running |
@@ -112,14 +126,15 @@ Next.js API Routes (standalone server)
     ↓
 ┌──────────────────────────────────────────┐
 │  discovery.ts  →  process-utils.ts       │  ps, lsof
+│                →  hooks-reader.ts        │  <pid>.json → status + transcript
 │                →  paths.ts               │  ~/.claude/projects mapping
 │                →  session-reader.ts       │  JSONL parsing
 │                →  git-info.ts            │  git status, diff, PR detection
-│                →  status-classifier.ts   │  Status state machine
+│                →  status-classifier.ts   │  Heuristic fallback
 └──────────────────────────────────────────┘
 ```
 
-No database — all state is derived from the filesystem and process table on every request.
+No database — all state is derived from the process table, hook event files, and JSONL transcripts on every request.
 
 ## First-time setup
 
