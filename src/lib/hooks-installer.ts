@@ -40,6 +40,7 @@ fi
 
 TS=$(date +%s)
 
+# $PPID = Claude process that invoked this hook (keys the event file by PID)
 echo "{\\"event\\":\\"$HOOK_EVENT\\",\\"session_id\\":\\"$SESSION_ID\\",\\"cwd\\":\\"$CWD\\",\\"transcript_path\\":\\"$TRANSCRIPT\\",\\"ts\\":$TS}" > "$EVENTS_DIR/$PPID.json"
 `;
 

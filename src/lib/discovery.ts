@@ -163,8 +163,9 @@ export async function discoverSessions(): Promise<ClaudeSession[]> {
 
   // Collect transcript paths claimed by hook events so fallback doesn't reuse them
   const claimedPaths = new Set<string>();
+  const activePids = new Set(pids);
   for (const [pid, hook] of hookStatuses) {
-    if (hook.transcriptPath && pids.includes(pid)) {
+    if (hook.transcriptPath && activePids.has(pid)) {
       claimedPaths.add(hook.transcriptPath);
     }
   }

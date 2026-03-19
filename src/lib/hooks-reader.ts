@@ -43,7 +43,7 @@ export async function readAllHookStatuses(): Promise<Map<number, HookStatus>> {
 
   await Promise.all(
     entries
-      .filter((e) => e.endsWith(".json") || e.endsWith(".jsonl"))
+      .filter((e) => e.endsWith(".json"))
       .map(async (filename) => {
         const filePath = join(EVENTS_DIR, filename);
 
@@ -66,17 +66,11 @@ export async function readAllHookStatuses(): Promise<Map<number, HookStatus>> {
         }
         if (!content) return;
 
-        // For old .jsonl files (multi-line), take the last line
-        const line = content.includes("\n")
-          ? content.split("\n").filter((l) => l.trim()).pop() ?? ""
-          : content;
-
         try {
-          const data = JSON.parse(line) as {
+          const data = JSON.parse(content) as {
             event?: string;
             session_id?: string;
             cwd?: string;
-            pid?: number;
             transcript_path?: string;
             ts?: number;
           };
@@ -86,18 +80,14 @@ export async function readAllHookStatuses(): Promise<Map<number, HookStatus>> {
           const status = classifyStatusFromHook(data.event);
           if (!status) return;
 
-          // PID from filename (.json) or from payload (.jsonl legacy)
-          const pid = filename.endsWith(".json")
-            ? parseInt(filename.replace(/\.json$/, ""), 10)
-            : data.pid;
-
-          if (pid == null || isNaN(pid)) return;
+          const pid = parseInt(filename.replace(/\.json$/, ""), 10);
+          if (isNaN(pid)) return;
 
           result.set(pid, {
             status,
             event: data.event,
             ts: data.ts ?? 0,
-            cwd: data.cwd ?? null,
+            cwd: data.cwd || null,
             sessionId: data.session_id || null,
             transcriptPath: data.transcript_path || null,
           });
