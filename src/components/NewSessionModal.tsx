@@ -33,7 +33,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
   const [selectedRepo, setSelectedRepo] = useState<string>(repoPath || "");
   const [selectedRepoName, setSelectedRepoName] = useState<string>(repoName || "");
   const [repoFilter, setRepoFilter] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(!repoPath);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [setupPath, setSetupPath] = useState("");
   const [setupLoading, setSetupLoading] = useState(false);
@@ -45,14 +45,34 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
   const [tmuxSessionsLoading, setTmuxSessionsLoading] = useState(false);
   const [selectedTmuxSession, setSelectedTmuxSession] = useState<string>("");
   const branchRef = useRef<HTMLInputElement>(null);
+  const repoListRef = useRef<HTMLDivElement>(null);
   const isRepoMode = !repoPath;
+
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+
+      // Trap ALL Tab events inside the modal
+      if (e.key === "Tab" && modalRef.current) {
+        e.preventDefault();
+        const focusable = Array.from(modalRef.current.querySelectorAll<HTMLElement>(
+          'input, textarea, button:not([disabled]), select, [tabindex]:not([tabindex="-1"])'
+        ));
+        if (focusable.length === 0) return;
+        const currentIdx = focusable.indexOf(document.activeElement as HTMLElement);
+        let nextIdx: number;
+        if (e.shiftKey) {
+          nextIdx = currentIdx <= 0 ? focusable.length - 1 : currentIdx - 1;
+        } else {
+          nextIdx = currentIdx >= focusable.length - 1 ? 0 : currentIdx + 1;
+        }
+        focusable[nextIdx].focus();
+      }
     }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", handleKey, true); // capture phase to beat all other handlers
+    return () => window.removeEventListener("keydown", handleKey, true);
   }, [onClose]);
 
   function fetchRepos() {
@@ -122,10 +142,20 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
       r.path.toLowerCase().includes(repoFilter.toLowerCase())
   );
 
-  // Reset highlight when filter changes
+  // Auto-highlight first result when filter changes
   useEffect(() => {
-    setHighlightedRepo(-1);
-  }, [repoFilter]);
+    setHighlightedRepo(filteredRepos.length > 0 ? 0 : -1);
+  }, [repoFilter, filteredRepos.length]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedRepo >= 0 && repoListRef.current) {
+      const items = repoListRef.current.children;
+      if (items[highlightedRepo]) {
+        (items[highlightedRepo] as HTMLElement).scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [highlightedRepo]);
 
   const selectRepo = (repo: RepoInfo) => {
     setSelectedRepo(repo.path);
@@ -145,10 +175,11 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
       setHighlightedRepo((prev) => Math.min(prev + 1, filteredRepos.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlightedRepo((prev) => Math.max(prev - 1, -1));
-    } else if (e.key === "Enter" && highlightedRepo >= 0 && highlightedRepo < filteredRepos.length) {
+      setHighlightedRepo((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter" && filteredRepos.length > 0) {
       e.preventDefault();
-      selectRepo(filteredRepos[highlightedRepo]);
+      const idx = highlightedRepo >= 0 ? highlightedRepo : 0;
+      selectRepo(filteredRepos[idx]);
     }
   };
 
@@ -239,7 +270,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative w-full max-w-md mx-4 rounded-2xl bg-[#0c0c14] border border-zinc-800 shadow-2xl shadow-black/50 overflow-hidden">
+      <div ref={modalRef} className="relative w-full max-w-md mx-4 rounded-2xl bg-[#0c0c14] border border-zinc-800 shadow-2xl shadow-black/50 overflow-hidden">
         <div className="px-6 pt-6 pb-4">
           <h2 className="text-lg font-semibold text-zinc-100">
             {isRepoMode ? "New Session" : `New Session in ${repoName}`}
@@ -351,7 +382,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                       className="w-full px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
                     />
                   </div>
-                  <div className="max-h-48 overflow-y-auto divide-y divide-zinc-800/30">
+                  <div ref={repoListRef} className="max-h-48 overflow-y-auto divide-y divide-zinc-800/30">
                     {reposLoading && (
                       <div className="px-3 py-4 text-sm text-zinc-600 text-center">Scanning for repos...</div>
                     )}
@@ -364,7 +395,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                         onClick={() => selectRepo(repo)}
                         onMouseEnter={() => setHighlightedRepo(i)}
                         className={`w-full text-left px-3 py-2 transition-colors ${
-                          highlightedRepo === i ? "bg-zinc-800/70" : selectedRepo === repo.path ? "bg-blue-500/10" : "hover:bg-zinc-800/50"
+                          highlightedRepo === i ? "bg-blue-500/15" : ""
                         }`}
                       >
                         <div className="flex items-center gap-2">

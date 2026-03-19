@@ -109,10 +109,9 @@ async function buildSession(
   // APPROVAL_SETTLE_MS), because PermissionRequest hooks fire for auto-approved tools too.
   // If the hook status is available (and not null, meaning PermissionRequest was ignored),
   // use it; otherwise fall back to the heuristic classifier.
-  const useHook = hookStatus && hookStatus.status !== null;
-  const status = useHook
-    ? hookStatus.status
-    : classifyStatus({
+  const hookDerivedStatus = hookStatus?.status ?? null;
+  const status: ClaudeSession["status"] = hookDerivedStatus
+    ?? classifyStatus({
         pid: info.pid,
         jsonlMtime: mtime,
         cpuPercent: info.cpuPercent,

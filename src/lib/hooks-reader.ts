@@ -7,7 +7,7 @@ const EVENTS_DIR = join(homedir(), ".claude-control", "events");
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 export interface HookStatus {
-  status: SessionStatus;
+  status: SessionStatus | null;
   event: string;
   ts: number;
   cwd: string | null;
@@ -80,7 +80,6 @@ export async function readAllHookStatuses(): Promise<Map<number, HookStatus>> {
           if (!data.event) return;
 
           const status = classifyStatusFromHook(data.event);
-          if (!status) return;
 
           const pid = parseInt(filename.replace(/\.json$/, ""), 10);
           if (isNaN(pid)) return;
