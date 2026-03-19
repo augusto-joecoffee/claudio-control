@@ -7,11 +7,6 @@ const STATUS_COLORS: Record<string, string> = {
   finished: "#71717a", // zinc-500
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  waiting: "",
-  idle: "",
-  finished: "",
-};
 
 // Generate a colored circle icon as a blob URL (cached per color)
 const iconCache = new Map<string, string>();

@@ -224,7 +224,7 @@ export function useKeyboardShortcuts({ sessions, targetScreen, onNewGlobal, onNe
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [orderedSessions, selectedSession, openAction, sendKeystroke, flash, onNewGlobal, onNewInRepo, onApproveReject, onStartEdit, editorAvailable, gitGuiAvailable]);
+  }, [orderedSessions, selectedSession, openAction, sendKeystroke, flash, onNewGlobal, onNewInRepo, onApproveReject, onStartEdit, onViewModeChange, editorAvailable, gitGuiAvailable]);
 
   return { selectedIndex, setSelectedIndex, selectedSession, actionFeedback };
 }
