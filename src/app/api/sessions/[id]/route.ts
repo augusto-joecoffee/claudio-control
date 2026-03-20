@@ -3,9 +3,10 @@ import { getSessionDetail } from "@/lib/discovery";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, { params }: { params: { id: string } }) {
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const detail = await getSessionDetail(params.id);
+    const { id } = await params;
+    const detail = await getSessionDetail(id);
     if (!detail) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
