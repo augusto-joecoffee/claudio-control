@@ -4,7 +4,7 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
-export async function POST() {
+export async function GET() {
   try {
     const script = `
 tell application "System Events"

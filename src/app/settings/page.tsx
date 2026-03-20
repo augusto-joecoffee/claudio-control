@@ -13,6 +13,14 @@ interface AppOptionDef extends OptionDef {
   installed: boolean;
 }
 
+interface DependencyDef {
+  id: string;
+  label: string;
+  description: string;
+  installed: boolean;
+  url: string;
+}
+
 interface SettingsData {
   config: {
     codeDirectories: string[];
@@ -39,6 +47,7 @@ interface SettingsData {
     terminalOpenIn: OptionDef[];
     terminalTmuxModes: OptionDef[];
   };
+  dependencies: DependencyDef[];
 }
 
 function Toggle({ enabled, onChange, label, description }: { enabled: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
@@ -233,6 +242,34 @@ export default function SettingsPage() {
           </Link>
         </div>
       </div>
+
+      {/* Dependencies section */}
+      <section className="mb-10">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Dependencies</h2>
+        <div className="rounded-xl border border-white/6 bg-[#0a0a0f]/80 px-5">
+          {data.dependencies.map((dep, i) => (
+            <div key={dep.id} className={`flex items-center justify-between py-4 ${i < data.dependencies.length - 1 ? "border-b border-white/4" : ""}`}>
+              <div className="flex items-center gap-3">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${dep.installed ? "bg-emerald-400" : "bg-red-400"}`} />
+                <div>
+                  <h3 className="text-sm font-medium text-zinc-200">{dep.label}</h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">{dep.description}</p>
+                </div>
+              </div>
+              {!dep.installed && (
+                <a
+                  href={dep.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 ml-4 px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 bg-white/4 hover:bg-white/8 border border-white/7 hover:border-white/15 transition-colors"
+                >
+                  Install
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* Tools section */}
       <section className="mb-10">

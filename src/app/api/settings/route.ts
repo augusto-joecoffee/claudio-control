@@ -39,14 +39,42 @@ async function checkInstalledApps<T extends { appName: string; command?: string 
   );
 }
 
+interface DependencyDef {
+  id: string;
+  label: string;
+  description: string;
+  command: string;
+  url: string;
+}
+
+const DEPENDENCIES: DependencyDef[] = [
+  { id: "gh", label: "GitHub CLI", description: "Pull request detection and status checks", command: "gh", url: "https://cli.github.com" },
+  { id: "claude", label: "Claude Code", description: "The whole reason this app exists", command: "claude", url: "https://docs.anthropic.com/en/docs/claude-code" },
+  { id: "tmux", label: "tmux", description: "Background terminal sessions and send-keys support", command: "tmux", url: "https://github.com/tmux/tmux" },
+];
+
+async function checkDependencies(): Promise<(DependencyDef & { installed: boolean })[]> {
+  return Promise.all(
+    DEPENDENCIES.map(async (dep) => {
+      try {
+        await execFileAsync("which", [dep.command], { timeout: 3000 });
+        return { ...dep, installed: true };
+      } catch {
+        return { ...dep, installed: false };
+      }
+    })
+  );
+}
+
 export async function GET() {
   try {
-    const [config, terminalApps, browsers, editors, gitGuis] = await Promise.all([
+    const [config, terminalApps, browsers, editors, gitGuis, dependencies] = await Promise.all([
       loadConfig(),
       checkInstalledApps(TERMINAL_APP_OPTIONS, new Set(["Terminal"])),
       checkInstalledApps(BROWSER_OPTIONS, new Set(["Safari"])),
       checkInstalledApps(EDITOR_OPTIONS),
       checkInstalledApps(GIT_GUI_OPTIONS),
+      checkDependencies(),
     ]);
 
     return NextResponse.json({
@@ -59,6 +87,7 @@ export async function GET() {
         terminalOpenIn: TERMINAL_OPEN_IN_OPTIONS,
         terminalTmuxModes: TERMINAL_TMUX_MODE_OPTIONS,
       },
+      dependencies,
     });
   } catch (error) {
     console.error("Failed to load settings:", error);
