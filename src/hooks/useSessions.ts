@@ -2,7 +2,6 @@ import useSWR from "swr";
 import { usePathname } from "next/navigation";
 import { ClaudeSession } from "@/lib/types";
 import { POLL_INTERVAL_MS } from "@/lib/constants";
-import { useRef } from "react";
 
 const fetcher = (url: string) =>
   fetch(url).then((r) => {
@@ -13,7 +12,6 @@ const fetcher = (url: string) =>
 export function useSessions() {
   const pathname = usePathname();
   const isOnDashboard = pathname === "/";
-  const hooksActiveRef = useRef(false);
 
   const { data, error, isLoading, mutate } = useSWR<{ sessions: ClaudeSession[]; hooksActive?: boolean }>(
     isOnDashboard ? "/api/sessions" : null,
@@ -25,13 +23,9 @@ export function useSessions() {
     }
   );
 
-  if (data?.hooksActive !== undefined) {
-    hooksActiveRef.current = data.hooksActive;
-  }
-
   return {
     sessions: data?.sessions ?? [],
-    hooksActive: hooksActiveRef.current,
+    hooksActive: data?.hooksActive ?? false,
     error,
     isLoading,
     refresh: mutate,

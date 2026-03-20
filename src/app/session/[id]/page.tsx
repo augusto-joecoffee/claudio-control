@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "@/hooks/useSession";
@@ -13,12 +13,11 @@ export default function SessionDetailPage() {
   const params = useParams();
   const id = typeof params.id === "string" ? decodeURIComponent(params.id) : "";
   const { session, isLoading, error } = useSession(id);
-  const [targetScreen, setTargetScreen] = useState<number | null>(null);
-
-  useEffect(() => {
+  const [targetScreen, setTargetScreen] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
     const saved = localStorage.getItem("targetScreen");
-    if (saved !== null) setTargetScreen(saved === "" ? null : parseInt(saved, 10));
-  }, []);
+    return saved !== null ? (saved === "" ? null : parseInt(saved, 10)) : null;
+  });
 
   if (isLoading && !session) {
     return (

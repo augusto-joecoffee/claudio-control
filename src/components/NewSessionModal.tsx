@@ -88,6 +88,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mode change
     if (isRepoMode) fetchRepos();
   }, [isRepoMode]);
 
@@ -135,6 +136,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
   }, [repoName]);
 
   const [highlightedRepo, setHighlightedRepo] = useState(-1);
+  const [prevRepoFilter, setPrevRepoFilter] = useState(repoFilter);
 
   const filteredRepos = repos.filter(
     (r) =>
@@ -142,10 +144,11 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
       r.path.toLowerCase().includes(repoFilter.toLowerCase())
   );
 
-  // Auto-highlight first result when filter changes
-  useEffect(() => {
+  // Reset highlight when filter changes (React 19 "adjust state during render" pattern)
+  if (repoFilter !== prevRepoFilter) {
+    setPrevRepoFilter(repoFilter);
     setHighlightedRepo(filteredRepos.length > 0 ? 0 : -1);
-  }, [repoFilter, filteredRepos.length]);
+  }
 
   // Scroll highlighted item into view
   useEffect(() => {

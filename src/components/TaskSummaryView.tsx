@@ -15,16 +15,16 @@ export function TaskSummaryView({ task, editing, onSave, onCancel, onStartEdit }
   const [expanded, setExpanded] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
+  const [prevTask, setPrevTask] = useState({ title: task.title, description: task.description });
   const titleRef = useRef<HTMLInputElement>(null);
   const descRef = useRef<HTMLInputElement>(null);
 
-  // Sync state when task changes externally
-  useEffect(() => {
-    if (!editing) {
-      setTitle(task.title);
-      setDescription(task.description ?? "");
-    }
-  }, [task.title, task.description, editing]);
+  // Sync state when task changes externally (React 19 "adjust state during render" pattern)
+  if (!editing && (task.title !== prevTask.title || task.description !== prevTask.description)) {
+    setPrevTask({ title: task.title, description: task.description });
+    setTitle(task.title);
+    setDescription(task.description ?? "");
+  }
 
   // Auto-focus title input when entering edit mode
   useEffect(() => {

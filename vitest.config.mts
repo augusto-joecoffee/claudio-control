@@ -11,6 +11,6 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: ["**/node_modules/**", "**/.next/**", "**/.claude/**", "**/dist/**"],
+    exclude: ["**/node_modules/**", "**/.next/**", "**/.claude/**", "**/dist/**", "**/next-app-dist/**"],
   },
 });
