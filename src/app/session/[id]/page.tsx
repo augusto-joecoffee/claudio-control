@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "@/hooks/useSession";
@@ -13,12 +13,11 @@ export default function SessionDetailPage() {
   const params = useParams();
   const id = typeof params.id === "string" ? decodeURIComponent(params.id) : "";
   const { session, isLoading, error } = useSession(id);
-  const [targetScreen, setTargetScreen] = useState<number | null>(null);
-
-  useEffect(() => {
+  const [targetScreen, setTargetScreen] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
     const saved = localStorage.getItem("targetScreen");
-    if (saved !== null) setTargetScreen(saved === "" ? null : parseInt(saved, 10));
-  }, []);
+    return saved !== null ? (saved === "" ? null : parseInt(saved, 10)) : null;
+  });
 
   if (isLoading && !session) {
     return (
@@ -61,11 +60,11 @@ export default function SessionDetailPage() {
           <h1 className="text-2xl font-bold tracking-tight text-zinc-100">
             {session.repoName || "Unknown"}
           </h1>
-          <p className="text-sm text-zinc-500 font-[family-name:var(--font-geist-mono)] mt-1">
+          <p className="text-sm text-zinc-500 font-(family-name:--font-geist-mono) mt-1">
             {session.workingDirectory}
           </p>
           {session.pid && (
-            <p className="text-xs text-zinc-600 font-[family-name:var(--font-geist-mono)] mt-1">
+            <p className="text-xs text-zinc-600 font-(family-name:--font-geist-mono) mt-1">
               PID {session.pid}
             </p>
           )}
@@ -78,11 +77,11 @@ export default function SessionDetailPage() {
 
       {/* Git panel */}
       {session.git && (
-        <div className="mb-6 p-5 rounded-xl bg-[#0a0a0f]/80 border border-zinc-800/50 backdrop-blur-sm">
+        <div className="mb-6 p-5 rounded-xl bg-[#0a0a0f]/80 border border-zinc-800/50 backdrop-blur-xs">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Git Status</h2>
           <GitSummary git={session.git} />
           {session.gitDiff && (
-            <pre className="mt-4 p-3 rounded-lg bg-black/30 text-xs text-zinc-400 font-[family-name:var(--font-geist-mono)] whitespace-pre-wrap overflow-x-auto border border-white/[0.04]">
+            <pre className="mt-4 p-3 rounded-lg bg-black/30 text-xs text-zinc-400 font-(family-name:--font-geist-mono) whitespace-pre-wrap overflow-x-auto border border-white/4">
               {session.gitDiff}
             </pre>
           )}
@@ -90,7 +89,7 @@ export default function SessionDetailPage() {
       )}
 
       {/* Conversation panel */}
-      <div className="p-5 rounded-xl bg-[#0a0a0f]/80 border border-zinc-800/50 backdrop-blur-sm">
+      <div className="p-5 rounded-xl bg-[#0a0a0f]/80 border border-zinc-800/50 backdrop-blur-xs">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">Conversation</h2>
         <ConversationView messages={session.conversation} />
       </div>

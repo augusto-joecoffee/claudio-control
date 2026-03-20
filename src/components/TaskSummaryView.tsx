@@ -15,16 +15,16 @@ export function TaskSummaryView({ task, editing, onSave, onCancel, onStartEdit }
   const [expanded, setExpanded] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
+  const [prevTask, setPrevTask] = useState({ title: task.title, description: task.description });
   const titleRef = useRef<HTMLInputElement>(null);
   const descRef = useRef<HTMLInputElement>(null);
 
-  // Sync state when task changes externally
-  useEffect(() => {
-    if (!editing) {
-      setTitle(task.title);
-      setDescription(task.description ?? "");
-    }
-  }, [task.title, task.description, editing]);
+  // Sync state when task changes externally (React 19 "adjust state during render" pattern)
+  if (!editing && (task.title !== prevTask.title || task.description !== prevTask.description)) {
+    setPrevTask({ title: task.title, description: task.description });
+    setTitle(task.title);
+    setDescription(task.description ?? "");
+  }
 
   // Auto-focus title input when entering edit mode
   useEffect(() => {
@@ -67,7 +67,7 @@ export function TaskSummaryView({ task, editing, onSave, onCancel, onStartEdit }
           onClick={stopProp}
           onFocus={stopProp}
           placeholder="Title"
-          className="w-full px-2 py-1.5 rounded-md text-xs font-medium bg-white/[0.06] border border-white/[0.10] focus:border-blue-500/40 focus:bg-white/[0.08] text-zinc-200 placeholder:text-zinc-600 outline-none transition-colors"
+          className="w-full px-2 py-1.5 rounded-md text-xs font-medium bg-white/6 border border-white/10 focus:border-blue-500/40 focus:bg-white/8 text-zinc-200 placeholder:text-zinc-600 outline-hidden transition-colors"
         />
         <input
           ref={descRef}
@@ -78,7 +78,7 @@ export function TaskSummaryView({ task, editing, onSave, onCancel, onStartEdit }
           onClick={stopProp}
           onFocus={stopProp}
           placeholder="Description (optional)"
-          className="w-full px-2 py-1.5 rounded-md text-[11px] bg-white/[0.06] border border-white/[0.10] focus:border-blue-500/40 focus:bg-white/[0.08] text-zinc-400 placeholder:text-zinc-600 outline-none transition-colors"
+          className="w-full px-2 py-1.5 rounded-md text-[11px] bg-white/6 border border-white/10 focus:border-blue-500/40 focus:bg-white/8 text-zinc-400 placeholder:text-zinc-600 outline-hidden transition-colors"
         />
         <div className="flex items-center gap-1.5">
           <button
@@ -86,14 +86,14 @@ export function TaskSummaryView({ task, editing, onSave, onCancel, onStartEdit }
             className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium bg-blue-600/80 hover:bg-blue-500 text-white transition-colors"
           >
             Save
-            <kbd className="ml-0.5 px-1 py-px rounded bg-white/15 text-[9px] font-mono">&#x23CE;</kbd>
+            <kbd className="ml-0.5 px-1 py-px rounded-sm bg-white/15 text-[9px] font-mono">&#x23CE;</kbd>
           </button>
           <button
             onClick={(e) => { stopProp(e); onCancel?.(); }}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] text-zinc-500 hover:text-zinc-300 bg-white/4 hover:bg-white/8 transition-colors"
           >
             Cancel
-            <kbd className="ml-0.5 px-1 py-px rounded bg-white/[0.06] text-[9px] font-mono">Esc</kbd>
+            <kbd className="ml-0.5 px-1 py-px rounded-sm bg-white/6 text-[9px] font-mono">Esc</kbd>
           </button>
         </div>
       </div>

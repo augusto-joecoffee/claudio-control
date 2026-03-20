@@ -84,7 +84,7 @@ export function DashboardHeader({ sessionCount, onNewSession, viewMode, onViewMo
           </Link>
         </div>
       </div>
-      <div className="mt-4 h-px bg-gradient-to-r from-zinc-800 via-zinc-700/50 to-transparent" />
+      <div className="mt-4 h-px bg-linear-to-r from-zinc-800 via-zinc-700/50 to-transparent" />
     </header>
   );
 }

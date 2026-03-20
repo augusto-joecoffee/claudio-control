@@ -41,11 +41,11 @@ export function PrStatusBadge({ pr }: { pr: PrStatus }) {
   const color = overallColor(pr);
 
   const borderColors: Record<string, string> = {
-    green: "border-emerald-500/[0.15] bg-emerald-500/[0.06]",
-    red: "border-red-500/[0.15] bg-red-500/[0.06]",
-    amber: "border-amber-500/[0.12] bg-amber-500/[0.05]",
-    purple: "border-violet-500/[0.15] bg-violet-500/[0.06]",
-    zinc: "border-white/[0.08] bg-white/[0.03]",
+    green: "border-emerald-500/15 bg-emerald-500/6",
+    red: "border-red-500/15 bg-red-500/6",
+    amber: "border-amber-500/12 bg-amber-500/5",
+    purple: "border-violet-500/15 bg-violet-500/6",
+    zinc: "border-white/8 bg-white/3",
   };
 
   // Merged or closed — show a simple badge
@@ -160,7 +160,7 @@ export function PrStatusBadge({ pr }: { pr: PrStatus }) {
     >
       {items.map((item, i) => (
         <span key={i} className="flex items-center gap-1.5">
-          {i > 0 && <span className="w-px h-3 bg-white/[0.08]" />}
+          {i > 0 && <span className="w-px h-3 bg-white/8" />}
           {item}
         </span>
       ))}

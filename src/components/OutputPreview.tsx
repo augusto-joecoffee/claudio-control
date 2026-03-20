@@ -25,7 +25,7 @@ export function OutputPreview({ preview, status }: { preview: ConversationPrevie
       {showTools && (
         <div className="flex items-center gap-1.5 text-xs flex-wrap">
           {preview.lastTools.map((tool, i) => (
-            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-300 font-mono text-[10px]">
+            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-violet-500/10 border border-violet-500/20 text-violet-300 font-mono text-[10px]">
               {tool.name}
             </span>
           ))}

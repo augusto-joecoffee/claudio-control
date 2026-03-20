@@ -25,27 +25,27 @@ const cardStyles: Record<SessionStatus, { border: string; glow: string; accent: 
   working: {
     border: "border-emerald-500/20 hover:border-emerald-500/40",
     glow: "glow-green",
-    accent: "from-emerald-500/[0.07] to-transparent",
+    accent: "from-emerald-500/7 to-transparent",
   },
   idle: {
     border: "border-amber-500/15 hover:border-amber-500/30",
     glow: "glow-yellow",
-    accent: "from-amber-500/[0.05] to-transparent",
+    accent: "from-amber-500/5 to-transparent",
   },
   waiting: {
     border: "border-blue-500/20 hover:border-blue-500/40",
     glow: "glow-blue",
-    accent: "from-blue-500/[0.07] to-transparent",
+    accent: "from-blue-500/7 to-transparent",
   },
   errored: {
     border: "border-red-500/20 hover:border-red-500/40",
     glow: "glow-red",
-    accent: "from-red-500/[0.07] to-transparent",
+    accent: "from-red-500/7 to-transparent",
   },
   finished: {
     border: "border-zinc-700/30 hover:border-zinc-600/50",
     glow: "glow-zinc",
-    accent: "from-zinc-500/[0.03] to-transparent",
+    accent: "from-zinc-500/3 to-transparent",
   },
 };
 
@@ -116,14 +116,14 @@ export function SessionCard({ session, targetScreen, pulse, selected, shortcutNu
     <div className="relative">
       <div
         onClick={onSelect}
-        className={`group relative flex flex-col rounded-xl border bg-[#0a0a0f]/80 backdrop-blur-sm p-5 card-hover cursor-pointer ${selected ? "ring-2 ring-blue-400 border-blue-400/50 shadow-[0_0_30px_rgba(96,165,250,0.25),0_0_60px_rgba(96,165,250,0.10)] scale-[1.02]" : styles.border} ${!selected ? styles.glow : ""} ${pulse ? "attention-pulse" : ""} ${cleanupState === "cleaning" ? "opacity-50 pointer-events-none" : ""}`}
+        className={`group relative flex flex-col rounded-xl border bg-[#0a0a0f]/80 backdrop-blur-xs p-5 card-hover cursor-pointer ${selected ? "ring-2 ring-blue-400 border-blue-400/50 shadow-[0_0_30px_rgba(96,165,250,0.25),0_0_60px_rgba(96,165,250,0.10)] scale-[1.02]" : styles.border} ${!selected ? styles.glow : ""} ${pulse ? "attention-pulse" : ""} ${cleanupState === "cleaning" ? "opacity-50 pointer-events-none" : ""}`}
       >
         {/* Gradient accent at top */}
-        <div className={`absolute inset-x-0 top-0 h-24 rounded-t-xl bg-gradient-to-b ${selected ? "from-blue-500/[0.12] to-transparent" : styles.accent} pointer-events-none transition-colors duration-150`} />
+        <div className={`absolute inset-x-0 top-0 h-24 rounded-t-xl bg-linear-to-b ${selected ? "from-blue-500/12 to-transparent" : styles.accent} pointer-events-none transition-colors duration-150`} />
 
         {/* Action feedback flash */}
         {actionFeedback && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/60 backdrop-blur-sm action-flash pointer-events-none">
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/60 backdrop-blur-xs action-flash pointer-events-none">
             <span className={`text-sm font-semibold px-3 py-1.5 rounded-lg ${
               actionFeedback.color === "emerald" ? "text-emerald-300 bg-emerald-500/20" :
               actionFeedback.color === "red" ? "text-red-300 bg-red-500/20" :
@@ -140,7 +140,7 @@ export function SessionCard({ session, targetScreen, pulse, selected, shortcutNu
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 {shortcutNumber !== undefined && (
-                  <span className={`shrink-0 flex items-center justify-center rounded font-bold font-[family-name:var(--font-geist-mono)] transition-all duration-150 ${selected ? "w-6 h-6 text-[11px] bg-blue-500 text-white shadow-[0_0_12px_rgba(96,165,250,0.5)]" : "w-5 h-5 text-[10px] bg-white/[0.04] border border-white/[0.06] text-zinc-600"}`}>
+                  <span className={`shrink-0 flex items-center justify-center rounded-sm font-bold font-(family-name:--font-geist-mono) transition-all duration-150 ${selected ? "w-6 h-6 text-[11px] bg-blue-500 text-white shadow-[0_0_12px_rgba(96,165,250,0.5)]" : "w-5 h-5 text-[10px] bg-white/4 border border-white/6 text-zinc-600"}`}>
                     {shortcutNumber}
                   </span>
                 )}
@@ -150,12 +150,12 @@ export function SessionCard({ session, targetScreen, pulse, selected, shortcutNu
                     : session.repoName || "Unknown"}
                 </h3>
                 {session.isWorktree && (
-                  <span className="shrink-0 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider rounded bg-violet-500/10 border border-violet-500/20 text-violet-400">
+                  <span className="shrink-0 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider rounded-sm bg-violet-500/10 border border-violet-500/20 text-violet-400">
                     worktree
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-zinc-600 truncate font-[family-name:var(--font-geist-mono)] mt-0.5">
+              <p className="text-[11px] text-zinc-600 truncate font-(family-name:--font-geist-mono) mt-0.5">
                 {session.workingDirectory.replace(/.*\/([^/]+\/[^/]+)$/, "$1")}
               </p>
             </div>
@@ -171,10 +171,10 @@ export function SessionCard({ session, targetScreen, pulse, selected, shortcutNu
           )}
 
           {/* Divider */}
-          <div className="h-px bg-white/[0.04] mb-3" />
+          <div className="h-px bg-white/4 mb-3" />
 
           {/* Task summary or output preview */}
-          <div className="mb-4 min-h-[3rem] flex-1">
+          <div className="mb-4 min-h-12 flex-1">
             {editing ? (
               <TaskSummaryView
                 task={session.taskSummary ?? { title: "", description: null, source: "user", ticketId: null, ticketUrl: null }}
@@ -203,7 +203,7 @@ export function SessionCard({ session, targetScreen, pulse, selected, shortcutNu
 
           {/* Time ago */}
           <div className="mb-3 mt-3">
-            <span className="text-[11px] text-zinc-600 font-[family-name:var(--font-geist-mono)]">
+            <span className="text-[11px] text-zinc-600 font-(family-name:--font-geist-mono)">
               {timeAgo(session.lastActivity)}
             </span>
           </div>
@@ -214,13 +214,13 @@ export function SessionCard({ session, targetScreen, pulse, selected, shortcutNu
               <span className="text-xs text-zinc-400 flex-1">Remove worktree and session?</span>
               <button
                 onClick={cancelCleanup}
-                className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] transition-colors"
+                className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 bg-white/4 hover:bg-white/8 border border-white/7 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCleanup}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-500/[0.08] hover:bg-red-500/[0.18] border border-red-500/[0.15] hover:border-red-500/[0.30] transition-colors"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-500/8 hover:bg-red-500/18 border border-red-500/15 hover:border-red-500/30 transition-colors"
               >
                 Confirm
               </button>

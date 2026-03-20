@@ -40,16 +40,16 @@ export function SessionRow({
       onClick={onSelect}
       className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-100 ${
         selected
-          ? "bg-blue-500/[0.08] border border-blue-400/30 shadow-[0_0_20px_rgba(96,165,250,0.1)]"
-          : "bg-white/[0.02] border border-transparent hover:bg-white/[0.04] hover:border-white/[0.06]"
+          ? "bg-blue-500/8 border border-blue-400/30 shadow-[0_0_20px_rgba(96,165,250,0.1)]"
+          : "bg-white/2 border border-transparent hover:bg-white/4 hover:border-white/6"
       }`}
     >
       {/* Shortcut number */}
       {shortcutNumber !== undefined && (
-        <span className={`shrink-0 flex items-center justify-center rounded font-bold font-[family-name:var(--font-geist-mono)] ${
+        <span className={`shrink-0 flex items-center justify-center rounded-sm font-bold font-(family-name:--font-geist-mono) ${
           selected
             ? "w-5 h-5 text-[10px] bg-blue-500 text-white"
-            : "w-5 h-5 text-[10px] bg-white/[0.04] border border-white/[0.06] text-zinc-600"
+            : "w-5 h-5 text-[10px] bg-white/4 border border-white/6 text-zinc-600"
         }`}>
           {shortcutNumber}
         </span>
@@ -74,7 +74,7 @@ export function SessionRow({
           {repoLabel}
         </span>
         {session.isWorktree && (
-          <span className="shrink-0 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider rounded bg-violet-500/10 border border-violet-500/20 text-violet-400">
+          <span className="shrink-0 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider rounded-sm bg-violet-500/10 border border-violet-500/20 text-violet-400">
             wt
           </span>
         )}
@@ -82,7 +82,7 @@ export function SessionRow({
 
       {/* Branch */}
       {session.git && (
-        <span className="shrink-0 hidden sm:flex items-center gap-1 text-[11px] text-zinc-500 font-[family-name:var(--font-geist-mono)]">
+        <span className="shrink-0 hidden sm:flex items-center gap-1 text-[11px] text-zinc-500 font-(family-name:--font-geist-mono)">
           <svg className="w-3 h-3 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
           </svg>
@@ -92,7 +92,7 @@ export function SessionRow({
 
       {/* Git stats */}
       {session.git && session.git.changedFiles > 0 && (
-        <div className="shrink-0 hidden md:flex items-center gap-1.5 text-[11px] font-[family-name:var(--font-geist-mono)]">
+        <div className="shrink-0 hidden md:flex items-center gap-1.5 text-[11px] font-(family-name:--font-geist-mono)">
           {session.git.additions > 0 && (
             <span className="text-emerald-500">+{session.git.additions}</span>
           )}
@@ -120,8 +120,8 @@ export function SessionRow({
       {isWaiting && session.hasPendingToolUse && onApproveReject && (
         <div className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {session.preview.lastTools.length > 0 && (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-500/[0.06] border border-blue-500/[0.12] max-w-[320px]">
-              <span className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/20 text-violet-300 font-mono text-[10px] font-medium">
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-500/6 border border-blue-500/12 max-w-[320px]">
+              <span className="shrink-0 px-1.5 py-0.5 rounded-sm bg-violet-500/15 border border-violet-500/20 text-violet-300 font-mono text-[10px] font-medium">
                 {session.preview.lastTools[0].name}
               </span>
               {session.preview.lastTools[0].input && (
@@ -142,7 +142,7 @@ export function SessionRow({
           </button>
           <button
             onClick={() => onApproveReject("reject")}
-            className="flex items-center justify-center w-6 h-6 rounded-md bg-white/[0.04] hover:bg-red-500/[0.15] border border-white/[0.07] hover:border-red-500/[0.25] text-zinc-500 hover:text-red-400 transition-colors"
+            className="flex items-center justify-center w-6 h-6 rounded-md bg-white/4 hover:bg-red-500/15 border border-white/7 hover:border-red-500/25 text-zinc-500 hover:text-red-400 transition-colors"
             title="Reject"
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>

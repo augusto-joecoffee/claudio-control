@@ -10,4 +10,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  test: {
+    exclude: ["**/node_modules/**", "**/.next/**", "**/.claude/**", "**/dist/**", "**/next-app-dist/**"],
+  },
 });

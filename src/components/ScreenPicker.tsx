@@ -18,7 +18,7 @@ export function ScreenPicker({ targetScreen, onChange }: Props) {
       <select
         value={targetScreen ?? ""}
         onChange={(e) => onChange(e.target.value === "" ? null : parseInt(e.target.value, 10))}
-        className="text-[11px] bg-zinc-900 border border-zinc-700/50 rounded-md px-2 py-1 text-zinc-300 outline-none focus:border-zinc-500 cursor-pointer"
+        className="text-[11px] bg-zinc-900 border border-zinc-700/50 rounded-md px-2 py-1 text-zinc-300 outline-hidden focus:border-zinc-500 cursor-pointer"
       >
         <option value="">Same screen</option>
         {screens.map((s) => (

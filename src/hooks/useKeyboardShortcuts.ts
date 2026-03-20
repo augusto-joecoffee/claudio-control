@@ -24,12 +24,14 @@ export function useKeyboardShortcuts({ sessions, targetScreen, onNewGlobal, onNe
   // Use the same grouped+flattened order as the grid renders
   const orderedSessions = useMemo(() => flattenGroupedSessions(sessions), [sessions]);
 
-  // Clamp selection when sessions change
-  useEffect(() => {
+  // Clamp selection when sessions change (React 19 "adjust state during render" pattern)
+  const [prevLength, setPrevLength] = useState(orderedSessions.length);
+  if (orderedSessions.length !== prevLength) {
+    setPrevLength(orderedSessions.length);
     if (selectedIndex !== null && selectedIndex >= orderedSessions.length) {
       setSelectedIndex(orderedSessions.length > 0 ? orderedSessions.length - 1 : null);
     }
-  }, [orderedSessions.length, selectedIndex]);
+  }
 
   const selectedSession = selectedIndex !== null ? orderedSessions[selectedIndex] ?? null : null;
 

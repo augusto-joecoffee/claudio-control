@@ -88,6 +88,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mode change
     if (isRepoMode) fetchRepos();
   }, [isRepoMode]);
 
@@ -135,6 +136,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
   }, [repoName]);
 
   const [highlightedRepo, setHighlightedRepo] = useState(-1);
+  const [prevRepoFilter, setPrevRepoFilter] = useState(repoFilter);
 
   const filteredRepos = repos.filter(
     (r) =>
@@ -142,10 +144,11 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
       r.path.toLowerCase().includes(repoFilter.toLowerCase())
   );
 
-  // Auto-highlight first result when filter changes
-  useEffect(() => {
+  // Reset highlight when filter changes (React 19 "adjust state during render" pattern)
+  if (repoFilter !== prevRepoFilter) {
+    setPrevRepoFilter(repoFilter);
     setHighlightedRepo(filteredRepos.length > 0 ? 0 : -1);
-  }, [repoFilter, filteredRepos.length]);
+  }
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -268,7 +271,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={onClose} />
 
       <div ref={modalRef} className="relative w-full max-w-md mx-4 rounded-2xl bg-[#0c0c14] border border-zinc-800 shadow-2xl shadow-black/50 overflow-hidden">
         <div className="px-6 pt-6 pb-4">
@@ -327,7 +330,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                   value={setupPath}
                   onChange={(e) => setSetupPath(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSetup()}
-                  className="flex-1 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors font-[family-name:var(--font-geist-mono)]"
+                  className="flex-1 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors font-(family-name:--font-geist-mono)"
                 />
                 <button
                   onClick={handleSetup}
@@ -353,7 +356,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                 {selectedRepo ? (
                   <div className="text-left min-w-0">
                     <span className="text-zinc-200 font-medium">{selectedRepoName}</span>
-                    <p className="text-[11px] text-zinc-600 font-[family-name:var(--font-geist-mono)] truncate">
+                    <p className="text-[11px] text-zinc-600 font-(family-name:--font-geist-mono) truncate">
                       {selectedRepo}
                     </p>
                   </div>
@@ -379,7 +382,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                       value={repoFilter}
                       onChange={(e) => setRepoFilter(e.target.value)}
                       onKeyDown={handleRepoFilterKeyDown}
-                      className="w-full px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                      className="w-full px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors"
                     />
                   </div>
                   <div ref={repoListRef} className="max-h-48 overflow-y-auto divide-y divide-zinc-800/30">
@@ -401,7 +404,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-zinc-200">{repo.name}</span>
                         </div>
-                        <p className="text-[11px] text-zinc-600 font-[family-name:var(--font-geist-mono)] mt-0.5 truncate">
+                        <p className="text-[11px] text-zinc-600 font-(family-name:--font-geist-mono) mt-0.5 truncate">
                           {repo.path}
                         </p>
                       </button>
@@ -446,7 +449,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                 value={branchName}
                 onChange={(e) => setBranchName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors font-[family-name:var(--font-geist-mono)]"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors font-(family-name:--font-geist-mono)"
               />
             </div>
           )}
@@ -462,7 +465,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                 value={baseBranch}
                 onChange={(e) => setBaseBranch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors font-[family-name:var(--font-geist-mono)]"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors font-(family-name:--font-geist-mono)"
               />
             </div>
           )}
@@ -479,7 +482,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                 value={prompt ?? ""}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handleCreate(); }}
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors resize-y min-h-[8rem]"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors resize-y min-h-32"
               />
             </div>
           )}
@@ -501,7 +504,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                       className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
                         selectedTmuxSession === s.name
                           ? "bg-blue-500/20 border-blue-500/40 text-blue-300 border"
-                          : "bg-white/[0.04] border border-white/[0.07] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.15]"
+                          : "bg-white/4 border border-white/7 text-zinc-400 hover:text-zinc-200 hover:border-white/15"
                       }`}
                     >
                       {s.name}
@@ -518,7 +521,7 @@ export function NewSessionModal({ repoPath, repoName, onClose }: Props) {
                 placeholder={repoName || selectedRepoName || "session name"}
                 value={selectedTmuxSession}
                 onChange={(e) => setSelectedTmuxSession(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors font-[family-name:var(--font-geist-mono)]"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors font-(family-name:--font-geist-mono)"
               />
               <p className="text-[11px] text-zinc-600 mt-1">
                 Pick an existing session above or type a name. Leave empty to use project name.

@@ -43,7 +43,7 @@ interface SettingsData {
 
 function Toggle({ enabled, onChange, label, description }: { enabled: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
   return (
-    <div className="flex items-center justify-between py-4 border-b border-white/[0.04] last:border-0">
+    <div className="flex items-center justify-between py-4 border-b border-white/4 last:border-0">
       <div>
         <h3 className="text-sm font-medium text-zinc-200">{label}</h3>
         <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
@@ -52,7 +52,7 @@ function Toggle({ enabled, onChange, label, description }: { enabled: boolean; o
         onClick={() => onChange(!enabled)}
         className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${enabled ? "bg-emerald-500" : "bg-zinc-700"}`}
       >
-        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${enabled ? "translate-x-5" : "translate-x-0"}`} />
+        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-xs transition-transform duration-200 ${enabled ? "translate-x-5" : "translate-x-0"}`} />
       </button>
     </div>
   );
@@ -72,7 +72,7 @@ function SettingRow<T extends OptionDef>({
   onChange: (val: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-4 border-b border-white/[0.04]">
+    <div className="flex items-center justify-between py-4 border-b border-white/4">
       <div className="flex-1 min-w-0 mr-4">
         <h3 className="text-sm font-medium text-zinc-200">{label}</h3>
         <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
@@ -80,7 +80,7 @@ function SettingRow<T extends OptionDef>({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="shrink-0 bg-zinc-900 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-600 w-[200px]"
+        className="shrink-0 bg-zinc-900 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-hidden focus:border-zinc-600 w-[200px]"
       >
         {options.map((opt) => {
           const installed = "installed" in opt ? (opt as AppOptionDef).installed : true;
@@ -237,7 +237,7 @@ export default function SettingsPage() {
       {/* Tools section */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Tools</h2>
-        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5">
+        <div className="rounded-xl border border-white/6 bg-[#0a0a0f]/80 px-5">
           <SettingRow
             label="Browser"
             description="Used for opening pull request links"
@@ -265,7 +265,7 @@ export default function SettingsPage() {
       {/* Terminal section */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Terminal</h2>
-        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5">
+        <div className="rounded-xl border border-white/6 bg-[#0a0a0f]/80 px-5">
           <SettingRow
             label="Terminal App"
             description="Which terminal to use for focusing sessions and creating new ones"
@@ -301,7 +301,7 @@ export default function SettingsPage() {
       {/* Notifications section */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Notifications</h2>
-        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5">
+        <div className="rounded-xl border border-white/6 bg-[#0a0a0f]/80 px-5">
           <Toggle
             label="Desktop Notifications"
             description="Show a macOS notification when a session finishes working"
@@ -326,8 +326,8 @@ export default function SettingsPage() {
       {/* Display section */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Display</h2>
-        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5">
-          <div className="flex items-center justify-between py-4 border-b border-white/[0.04]">
+        <div className="rounded-xl border border-white/6 bg-[#0a0a0f]/80 px-5">
+          <div className="flex items-center justify-between py-4 border-b border-white/4">
             <div>
               <h3 className="text-sm font-medium text-zinc-200">Target Screen</h3>
               <p className="text-xs text-zinc-500 mt-0.5">Which screen to open apps on when using quick actions</p>
@@ -355,7 +355,7 @@ export default function SettingsPage() {
       {/* Session defaults section */}
       <section className="mb-10">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Session Defaults</h2>
-        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5 py-4 space-y-5">
+        <div className="rounded-xl border border-white/6 bg-[#0a0a0f]/80 px-5 py-4 space-y-5">
           <div>
             <h3 className="text-sm font-medium text-zinc-200">Initial Prompt</h3>
             <p className="text-xs text-zinc-500 mt-0.5 mb-2">Default prompt used when creating new sessions with a branch name</p>
@@ -364,7 +364,7 @@ export default function SettingsPage() {
               value={promptDraft ?? ""}
               onChange={(e) => savePromptDebounced(e.target.value)}
               placeholder="e.g. Read the CLAUDE.md and implement the ticket..."
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors resize-y min-h-[5rem]"
+              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors resize-y min-h-20"
             />
           </div>
           <div>
@@ -375,7 +375,7 @@ export default function SettingsPage() {
               value={prPromptDraft ?? ""}
               onChange={(e) => savePrPromptDebounced(e.target.value)}
               placeholder="e.g. /create-pr or a natural language instruction"
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors resize-y min-h-[4rem]"
+              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors resize-y min-h-16"
             />
           </div>
           <div>
@@ -386,7 +386,7 @@ export default function SettingsPage() {
               value={baseBranchDraft ?? "main"}
               onChange={(e) => saveBaseBranchDebounced(e.target.value)}
               placeholder="main"
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700/50 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors"
             />
           </div>
         </div>
@@ -395,7 +395,7 @@ export default function SettingsPage() {
       {/* Code directories section */}
       <section>
         <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Code Directories</h2>
-        <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0f]/80 px-5 py-3">
+        <div className="rounded-xl border border-white/6 bg-[#0a0a0f]/80 px-5 py-3">
           <p className="text-xs text-zinc-500 mb-3">
             Folders that are scanned for git repositories when creating new sessions.
           </p>
@@ -404,7 +404,7 @@ export default function SettingsPage() {
               {data.config.codeDirectories.map((dir) => (
                 <div
                   key={dir}
-                  className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]"
+                  className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/3 border border-white/4"
                 >
                   <span className="text-sm text-zinc-300 font-mono truncate">{dir}</span>
                   <button
@@ -425,7 +425,7 @@ export default function SettingsPage() {
           <button
             onClick={addDirectory}
             disabled={addingDir}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] hover:border-white/[0.15] transition-colors disabled:opacity-40"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 bg-white/4 hover:bg-white/8 border border-white/7 hover:border-white/15 transition-colors disabled:opacity-40"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />

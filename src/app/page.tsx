@@ -18,11 +18,22 @@ import Link from "next/link";
 
 export default function Dashboard() {
   const { sessions, isLoading, error, hooksActive, refresh } = useSessions();
-  const [targetScreen, setTargetScreen] = useState<number | null>(null);
+  const [targetScreen, setTargetScreen] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const saved = localStorage.getItem("targetScreen");
+    return saved !== null ? (saved === "" ? null : parseInt(saved, 10)) : null;
+  });
   const [freshlyChanged, setFreshlyChanged] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<{ repoPath?: string; repoName?: string } | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [showKeyboardHints, setShowKeyboardHints] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "grid";
+    const saved = localStorage.getItem("viewMode");
+    return saved === "grid" || saved === "list" ? saved : "grid";
+  });
+  const [showKeyboardHints, setShowKeyboardHints] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("showKeyboardHints") !== "false";
+  });
   const [dismissToast, setDismissToast] = useState(false);
   // Optimistic approve/reject state: sessionId → { action, timestamp }
   const [actedSessions, setActedSessions] = useState<Record<string, { action: "approve" | "reject"; at: number }>>({});
@@ -94,6 +105,7 @@ export default function Dashboard() {
       }
     }
     if (toRemove.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- timer-based cleanup of optimistic state
       setActedSessions((prev) => {
         const next = { ...prev };
         for (const id of toRemove) delete next[id];
@@ -128,15 +140,7 @@ export default function Dashboard() {
   }, [sessions, setSelectedIndex]);
   const sendNotification = useDesktopNotification(alwaysNotify, handleNotificationClick);
 
-  // Persist preferences
-  useEffect(() => {
-    const saved = localStorage.getItem("targetScreen");
-    if (saved !== null) setTargetScreen(saved === "" ? null : parseInt(saved, 10));
-    const savedView = localStorage.getItem("viewMode");
-    if (savedView === "grid" || savedView === "list") setViewMode(savedView);
-    const savedHints = localStorage.getItem("showKeyboardHints");
-    if (savedHints === "false") setShowKeyboardHints(false);
-  }, []);
+  // Preferences are initialized via lazy useState initializers above
 
   // Pending "idle" notifications — delayed to avoid false notifications from brief
   // idle gaps between turns (e.g. Stop → UserPromptSubmit within seconds).
@@ -222,6 +226,7 @@ export default function Dashboard() {
           if (session) sendNotification(session, session.status);
         });
       }
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- notification highlight with delayed clear
       setFreshlyChanged(changed);
       setTimeout(() => setFreshlyChanged(new Set()), 2000);
     }
@@ -295,7 +300,7 @@ export default function Dashboard() {
       {dismissToast && (
         <div className="fixed bottom-0 inset-x-0 z-40 pointer-events-none">
           <div className="max-w-7xl mx-auto px-6 pb-4">
-            <div className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0a0a0f]/90 backdrop-blur-md border border-white/[0.06] pointer-events-auto text-xs text-zinc-500">
+            <div className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0a0a0f]/90 backdrop-blur-md border border-white/6 pointer-events-auto text-xs text-zinc-500">
               Keyboard hints hidden. Re-enable in{" "}
               <Link href="/settings" className="text-blue-400 hover:text-blue-300 underline underline-offset-2 transition-colors">
                 Settings

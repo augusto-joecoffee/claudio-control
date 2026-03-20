@@ -68,11 +68,11 @@ export function QuickReply({
       {/* Show what's pending */}
       {isPermissionPrompt && lastTools.length > 0 ? (
         <div
-          className="mb-2.5 px-2.5 py-2 rounded-lg bg-blue-500/[0.06] border border-blue-500/[0.12] cursor-pointer hover:bg-blue-500/[0.10] transition-colors"
+          className="mb-2.5 px-2.5 py-2 rounded-lg bg-blue-500/6 border border-blue-500/12 cursor-pointer hover:bg-blue-500/10 transition-colors"
           onClick={(e) => { stopProp(e); setToolExpanded(!toolExpanded); }}
         >
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/20 text-violet-300 font-mono text-[10px] font-medium">
+            <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-sm bg-violet-500/15 border border-violet-500/20 text-violet-300 font-mono text-[10px] font-medium">
               {lastTools[0].name}
             </span>
             {!toolExpanded && (lastTools[0].description || lastTools[0].input) && (
@@ -102,7 +102,7 @@ export function QuickReply({
           )}
         </div>
       ) : lastAssistantText ? (
-        <div className="mb-2.5 px-2.5 py-2 rounded-lg bg-blue-500/[0.06] border border-blue-500/[0.12]">
+        <div className="mb-2.5 px-2.5 py-2 rounded-lg bg-blue-500/6 border border-blue-500/12">
           <p className="text-[11px] text-blue-300/70 line-clamp-3 leading-relaxed">
             {lastAssistantText}
           </p>
@@ -138,7 +138,7 @@ export function QuickReply({
             className={`h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg text-xs transition-colors ${
               sending === "reject"
                 ? "bg-red-500/15 border border-red-500/25 text-red-400"
-                : "bg-white/[0.04] hover:bg-red-500/[0.12] border border-white/[0.07] hover:border-red-500/[0.25] text-zinc-500 hover:text-red-400"
+                : "bg-white/4 hover:bg-red-500/12 border border-white/7 hover:border-red-500/25 text-zinc-500 hover:text-red-400"
             } disabled:opacity-60`}
           >
             {sending === "reject" ? "Sent!" : "Reject"}
@@ -149,7 +149,7 @@ export function QuickReply({
               setShowReply(!showReply);
               if (!showReply) setTimeout(() => inputRef.current?.focus(), 100);
             }}
-            className="has-tooltip h-8 w-8 flex items-center justify-center rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="has-tooltip h-8 w-8 flex items-center justify-center rounded-lg bg-white/4 hover:bg-white/8 border border-white/7 text-zinc-500 hover:text-zinc-300 transition-colors"
             data-tip="Reply"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -170,7 +170,7 @@ export function QuickReply({
             onFocus={stopProp}
             placeholder={sending === "reply" ? "Sent!" : "Reply to Claude..."}
             disabled={sending !== null}
-            className="flex-1 h-8 px-3 rounded-lg text-xs bg-white/[0.06] border border-white/[0.10] focus:border-blue-500/40 focus:bg-white/[0.08] text-zinc-200 placeholder:text-zinc-600 outline-none transition-colors disabled:opacity-50"
+            className="flex-1 h-8 px-3 rounded-lg text-xs bg-white/6 border border-white/10 focus:border-blue-500/40 focus:bg-white/8 text-zinc-200 placeholder:text-zinc-600 outline-hidden transition-colors disabled:opacity-50"
           />
           <button
             onClick={(e) => { stopProp(e); sendMessage(); }}
@@ -197,7 +197,7 @@ export function QuickReply({
             onFocus={stopProp}
             placeholder="Type a reply..."
             disabled={sending !== null}
-            className="flex-1 h-8 px-3 rounded-lg text-xs bg-white/[0.06] border border-white/[0.10] focus:border-blue-500/40 focus:bg-white/[0.08] text-zinc-200 placeholder:text-zinc-600 outline-none transition-colors disabled:opacity-50"
+            className="flex-1 h-8 px-3 rounded-lg text-xs bg-white/6 border border-white/10 focus:border-blue-500/40 focus:bg-white/8 text-zinc-200 placeholder:text-zinc-600 outline-hidden transition-colors disabled:opacity-50"
           />
           <button
             onClick={(e) => { stopProp(e); sendMessage(); }}

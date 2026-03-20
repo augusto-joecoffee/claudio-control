@@ -164,7 +164,7 @@ export function SessionGrid({ sessions, viewMode, targetScreen, freshlyChanged, 
           <h2 className={`text-sm font-semibold ${accent.text}`}>{prettifyName(group.repoName)}</h2>
         </div>
         {showCount && (
-          <span className="text-[11px] text-zinc-600 font-[family-name:var(--font-geist-mono)]">
+          <span className="text-[11px] text-zinc-600 font-(family-name:--font-geist-mono)">
             {group.sessions.length} session{group.sessions.length !== 1 ? "s" : ""}
           </span>
         )}
@@ -179,7 +179,7 @@ export function SessionGrid({ sessions, viewMode, targetScreen, freshlyChanged, 
             </svg>
           </button>
         )}
-        <div className={`flex-1 h-px bg-gradient-to-r ${accent.line} to-transparent`} />
+        <div className={`flex-1 h-px bg-linear-to-r ${accent.line} to-transparent`} />
       </div>
     );
   };

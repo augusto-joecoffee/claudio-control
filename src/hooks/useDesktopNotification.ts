@@ -61,9 +61,11 @@ function getRepoLabel(session: ClaudeSession): string {
 export function useDesktopNotification(alwaysNotify: boolean = false, onSelectSession?: (sessionId: string) => void) {
   const permissionGranted = useRef(false);
   const alwaysNotifyRef = useRef(alwaysNotify);
-  alwaysNotifyRef.current = alwaysNotify;
   const onSelectRef = useRef(onSelectSession);
-  onSelectRef.current = onSelectSession;
+  useEffect(() => {
+    alwaysNotifyRef.current = alwaysNotify;
+    onSelectRef.current = onSelectSession;
+  });
 
   useEffect(() => {
     if ("Notification" in window) {
