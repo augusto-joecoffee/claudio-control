@@ -6,6 +6,19 @@ const http = require("http");
 
 const PORT = 3200;
 let nextProcess = null;
+
+// Electron apps launched from Finder/dock get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin).
+// Augment it so child processes can find tools like `gh` installed via Homebrew or other managers.
+const EXTRA_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/sbin"];
+if (process.env.PATH) {
+  const existing = process.env.PATH.split(":");
+  for (const p of EXTRA_PATHS) {
+    if (!existing.includes(p)) existing.push(p);
+  }
+  process.env.PATH = existing.join(":");
+} else {
+  process.env.PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", ...EXTRA_PATHS].join(":");
+}
 let mainWindow = null;
 let isQuitting = false;
 
