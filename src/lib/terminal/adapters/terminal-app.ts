@@ -52,11 +52,13 @@ export const terminalAppAdapter: TerminalAdapter = {
     await execFileAsync("osascript", ["-e", script], { timeout: OSASCRIPT_TIMEOUT_MS });
   },
 
-  async createSession(command: string): Promise<void> {
+  async createSession(command: string, opts: CreateSessionOpts): Promise<void> {
     const asCmd = escapeForAppleScript(command);
+    // "do script" opens a new window by default; pass "in front window" for tabs
+    const target = opts.openIn === "tab" ? ` in front window` : "";
     const script = `tell application "Terminal"
   activate
-  do script "${asCmd}"
+  do script "${asCmd}"${target}
 end tell`;
     await execFileAsync("osascript", ["-e", script], { timeout: OSASCRIPT_TIMEOUT_MS });
   },

@@ -5,6 +5,22 @@ import type { TerminalAdapter, CreateSessionOpts } from "./types";
 import { execFileAsync, OSASCRIPT_TIMEOUT_MS } from "./shared";
 import { createGenericAdapter } from "./generic";
 
+// ── kitten @ ls response types ──────────────────────────────────────────────
+// Partial types for the JSON returned by `kitten @ ls`. Only the fields we
+// need for PID-based window matching are included.
+
+interface KittyLsWindow {
+  id: number;
+  pid: number;
+  foreground_processes?: { pid: number }[];
+}
+interface KittyLsTab {
+  windows: KittyLsWindow[];
+}
+interface KittyLsOsWindow {
+  tabs: KittyLsTab[];
+}
+
 /** Short timeout for kitten @ — local socket should respond in <100ms. */
 const KITTEN_TIMEOUT_MS = 2000;
 
@@ -111,11 +127,11 @@ async function listKittyWindows(): Promise<{ id: number; pid: number; fgPids: nu
 
   try {
     const windows: { id: number; pid: number; fgPids: number[] }[] = [];
-    const osWindows = JSON.parse(output);
+    const osWindows: KittyLsOsWindow[] = JSON.parse(output);
     for (const osWin of osWindows) {
       for (const tab of osWin.tabs) {
         for (const win of tab.windows) {
-          const fgPids = (win.foreground_processes ?? []).map((fg: { pid: number }) => fg.pid);
+          const fgPids = (win.foreground_processes ?? []).map((fg) => fg.pid);
           windows.push({ id: win.id, pid: win.pid, fgPids });
         }
       }
