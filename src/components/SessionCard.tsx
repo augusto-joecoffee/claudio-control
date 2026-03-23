@@ -206,7 +206,7 @@ export function SessionCard({
                 {session.workingDirectory.replace(/.*\/([^/]+\/[^/]+)$/, "$1")}
               </p>
             </div>
-            <StatusBadge status={displayStatus} />
+            <StatusBadge status={displayStatus} orphaned={session.orphaned} />
           </div>
 
           {/* Git info + PR status */}
@@ -295,6 +295,7 @@ export function SessionCard({
               targetScreen={targetScreen}
               status={displayStatus}
               prUrl={session.prUrl}
+              orphaned={session.orphaned}
               onCleanup={canCleanup ? handleCleanup : undefined}
             />
           )}

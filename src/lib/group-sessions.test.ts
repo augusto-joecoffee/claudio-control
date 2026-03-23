@@ -26,6 +26,7 @@ function makeSession(overrides: Partial<ClaudeSession> = {}): ClaudeSession {
     taskSummary: null,
     jsonlPath: null,
     prUrl: null,
+    orphaned: false,
     ...overrides,
   };
 }
