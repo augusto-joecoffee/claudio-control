@@ -213,7 +213,9 @@ export default function SettingsPage() {
   const addDirectory = async () => {
     setAddingDir(true);
     try {
-      const api = (window as unknown as { electronAPI?: { pickFolder: () => Promise<{ cancelled?: boolean; path?: string }> } }).electronAPI;
+      const api = (
+        window as unknown as { electronAPI?: { pickFolder: () => Promise<{ cancelled?: boolean; path?: string }> } }
+      ).electronAPI;
       if (!api) {
         console.error("Folder picker is only available in the desktop app");
         setAddingDir(false);
