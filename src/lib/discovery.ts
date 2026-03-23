@@ -2,7 +2,8 @@ import { readdir, stat } from "fs/promises";
 import { join } from "path";
 import { ClaudeSession, ConversationPreview } from "./types";
 import { ProcessInfo, getAllProcessInfos } from "./process-utils";
-import { buildProcessTree, findClaudePidsFromTree, evictStaleTerminalCache } from "./terminal/detect";
+import { buildProcessTree, findClaudePidsFromTree, evictStaleTerminalCache, detectAllTmuxPanes, getTtysForPids, isOrphaned } from "./terminal/detect";
+import { ORPHAN_CHECK_INTERVAL_MS } from "./constants";
 import { workingDirToProjectDir, repoNameFromPath } from "./paths";
 import {
   readJsonlTail,
@@ -50,10 +51,15 @@ async function findLatestJsonl(projectDir: string, excludePaths?: Set<string>): 
   }
 }
 
+// Orphan check runs on a slower cadence than the main poll
+let lastOrphanCheck = 0;
+let orphanedPids = new Set<number>();
+
 async function buildSession(
   info: ProcessInfo,
   hookStatus: HookStatus | undefined,
   claimedPaths: Set<string>,
+  orphaned: boolean,
 ): Promise<ClaudeSession | null> {
   if (!info.workingDirectory) return null;
 
@@ -140,6 +146,7 @@ async function buildSession(
     taskSummary,
     jsonlPath,
     prUrl,
+    orphaned,
   };
 }
 
@@ -158,6 +165,22 @@ export async function discoverSessions(): Promise<ClaudeSession[]> {
   const activePids = new Set(pids);
   evictStaleTerminalCache(activePids);
 
+  // Orphan check on slower interval — batched to minimize subprocess calls
+  const now = Date.now();
+  if (now - lastOrphanCheck >= ORPHAN_CHECK_INTERVAL_MS) {
+    lastOrphanCheck = now;
+    const [ttyMap, tmuxPanes] = await Promise.all([getTtysForPids(pids), detectAllTmuxPanes()]);
+    const newOrphaned = new Set<number>();
+    for (const pid of pids) {
+      const tty = ttyMap.get(pid);
+      const paneInTmux = tty ? tmuxPanes.has(tty) : false;
+      if (isOrphaned(pid, processTree, paneInTmux)) {
+        newOrphaned.add(pid);
+      }
+    }
+    orphanedPids = newOrphaned;
+  }
+
   // Collect transcript paths claimed by hook events so fallback doesn't reuse them
   const claimedPaths = new Set<string>();
   for (const [pid, hook] of hookStatuses) {
@@ -169,7 +192,7 @@ export async function discoverSessions(): Promise<ClaudeSession[]> {
   const results = await Promise.all(
     processInfos
       .filter((info) => info.workingDirectory !== null)
-      .map((info) => buildSession(info, hookStatuses.get(info.pid), claimedPaths)),
+      .map((info) => buildSession(info, hookStatuses.get(info.pid), claimedPaths, orphanedPids.has(info.pid))),
   );
 
   const sessions = results.filter((s): s is ClaudeSession => s !== null);
