@@ -28,6 +28,7 @@ export async function focusSession(info: TerminalInfo): Promise<void> {
   const effectiveInfo = info.inTmux && info.tmux?.clientTty ? { ...info, tty: info.tmux.clientTty } : info;
 
   const adapter = getAdapter(effectiveInfo.app);
+  if (!adapter) return; // Unknown terminal — nothing to focus
   await adapter.focus(effectiveInfo);
 }
 
@@ -41,6 +42,7 @@ export async function sendText(info: TerminalInfo, text: string): Promise<void> 
   }
 
   const adapter = getAdapter(info.app);
+  if (!adapter) return;
   await adapter.sendText(info, text);
 }
 
@@ -62,6 +64,7 @@ export async function sendKeystroke(info: TerminalInfo, keystroke: string): Prom
   }
 
   const adapter = getAdapter(info.app);
+  if (!adapter) return;
   await adapter.sendKeystroke(info, keystroke);
 }
 
@@ -124,6 +127,7 @@ export async function createSession(opts: CreateSessionPublicOpts): Promise<void
   }
 
   const adapter = getAdapter(terminalApp);
+  if (!adapter) throw new Error(`No adapter for terminal: ${terminalApp}`);
   await adapter.createSession(effectiveCommand, { openIn, useTmux, tmuxSession, cwd, prompt });
 }
 

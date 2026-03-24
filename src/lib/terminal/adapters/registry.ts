@@ -18,12 +18,8 @@ const adapters: Partial<Record<TerminalApp, TerminalAdapter>> = {
   warp: warpAdapter,
 };
 
-export function getAdapter(app: TerminalApp): TerminalAdapter {
-  const adapter = adapters[app];
-  if (!adapter) {
-    throw new Error(`No adapter for terminal: ${app}`);
-  }
-  return adapter;
+export function getAdapter(app: TerminalApp): TerminalAdapter | null {
+  return adapters[app] ?? null;
 }
 
 /** Register a new terminal adapter at runtime. */

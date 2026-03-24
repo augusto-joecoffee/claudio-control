@@ -23,9 +23,9 @@ describe("adapter registry", () => {
     }
   });
 
-  it("throws for unknown terminal", async () => {
+  it("returns null for unknown terminal", async () => {
     const { getAdapter } = await import("./adapters/registry");
-    expect(() => getAdapter("unknown")).toThrow("No adapter for terminal: unknown");
+    expect(getAdapter("unknown")).toBeNull();
   });
 
   it("allows registering a custom adapter", async () => {
@@ -37,8 +37,8 @@ describe("adapter registry", () => {
       createSession: vi.fn(),
     };
 
-    // Should throw before registration
-    expect(() => getAdapter("unknown")).toThrow();
+    // Should return null before registration
+    expect(getAdapter("unknown")).toBeNull();
 
     registerAdapter("unknown", mockAdapter);
     expect(getAdapter("unknown")).toBe(mockAdapter);
