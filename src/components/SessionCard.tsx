@@ -296,6 +296,7 @@ export function SessionCard({
               status={displayStatus}
               prUrl={session.prUrl}
               orphaned={session.orphaned}
+              tmuxSession={session.tmuxSession}
               onCleanup={canCleanup ? handleCleanup : undefined}
             />
           )}

@@ -41,6 +41,7 @@ export function QuickActions({
   status,
   prUrl,
   orphaned,
+  tmuxSession,
   onCleanup,
 }: {
   path: string;
@@ -49,6 +50,7 @@ export function QuickActions({
   status?: string;
   prUrl?: string | null;
   orphaned?: boolean;
+  tmuxSession?: string | null;
   onCleanup?: (e: React.MouseEvent) => void;
 }) {
   const [prSending, setPrSending] = useState(false);
@@ -71,6 +73,26 @@ export function QuickActions({
     // Reset after 3s in case session doesn't disappear immediately
     setTimeout(() => setKilling(false), 3000);
   };
+
+  const [reattaching, setReattaching] = useState(false);
+
+  const reattachSession = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!tmuxSession) return;
+    setReattaching(true);
+    try {
+      await fetch("/api/sessions/reattach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tmuxSession, cwd: path }),
+      });
+    } catch (err) {
+      console.error("Reattach failed:", err);
+    }
+    setTimeout(() => setReattaching(false), 3000);
+  };
+
   const { editorAvailable, gitGuiAvailable } = useSettings();
 
   const openAction = async (e: React.MouseEvent, action: string) => {
@@ -163,19 +185,36 @@ export function QuickActions({
       ) : null}
 
       {pid && orphaned ? (
-        <IconButton
-          onClick={killSession}
-          tip={killing ? "Killing..." : "Kill orphaned session"}
-          className={`flex-1 flex items-center justify-center h-8 rounded-lg ${
-            killing
-              ? "bg-orange-500/10 border-orange-500/20 text-orange-400"
-              : "bg-white/4 hover:bg-orange-500/12 border border-white/7 hover:border-orange-500/25 text-zinc-500 hover:text-orange-400"
-          } transition-all duration-150`}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </IconButton>
+        <>
+          {tmuxSession && (
+            <IconButton
+              onClick={reattachSession}
+              tip={reattaching ? "Reattaching..." : "Reattach tmux session"}
+              className={`flex-1 flex items-center justify-center h-8 rounded-lg ${
+                reattaching
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                  : "bg-white/4 hover:bg-emerald-500/12 border border-white/7 hover:border-emerald-500/25 text-zinc-500 hover:text-emerald-400"
+              } transition-all duration-150`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 15l6-6m-5.5.5h.01m4.99 5h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </IconButton>
+          )}
+          <IconButton
+            onClick={killSession}
+            tip={killing ? "Killing..." : "Kill orphaned session"}
+            className={`flex-1 flex items-center justify-center h-8 rounded-lg ${
+              killing
+                ? "bg-orange-500/10 border-orange-500/20 text-orange-400"
+                : "bg-white/4 hover:bg-orange-500/12 border border-white/7 hover:border-orange-500/25 text-zinc-500 hover:text-orange-400"
+            } transition-all duration-150`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </IconButton>
+        </>
       ) : pid ? (
         <IconButton onClick={(e) => openAction(e, "focus")} tip="Terminal" className={`flex-1 ${iconBtnClass}`}>
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

@@ -54,12 +54,14 @@ async function findLatestJsonl(projectDir: string, excludePaths?: Set<string>): 
 // Orphan check runs on a slower cadence than the main poll
 let lastOrphanCheck = 0;
 let orphanedPids = new Set<number>();
+let pidTmuxSession = new Map<number, string>();
 
 async function buildSession(
   info: ProcessInfo,
   hookStatus: HookStatus | undefined,
   claimedPaths: Set<string>,
   orphaned: boolean,
+  tmuxSession: string | null,
 ): Promise<ClaudeSession | null> {
   if (!info.workingDirectory) return null;
 
@@ -147,6 +149,7 @@ async function buildSession(
     jsonlPath,
     prUrl,
     orphaned,
+    tmuxSession,
   };
 }
 
@@ -173,6 +176,7 @@ export async function discoverSessions(): Promise<ClaudeSession[]> {
     // Build set of tmux session names that have at least one attached client
     const attachedTmuxSessions = new Set(tmuxClients.map((c) => c.sessionName));
     const newOrphaned = new Set<number>();
+    const newPidTmuxSession = new Map<number, string>();
     for (const pid of pids) {
       const tty = ttyMap.get(pid);
       const paneInfo = tty ? tmuxPanes.get(tty) : undefined;
@@ -181,8 +185,12 @@ export async function discoverSessions(): Promise<ClaudeSession[]> {
       if (isOrphaned(pid, processTree, inTmux, tmuxSessionHasClient)) {
         newOrphaned.add(pid);
       }
+      if (paneInfo) {
+        newPidTmuxSession.set(pid, paneInfo.sessionName);
+      }
     }
     orphanedPids = newOrphaned;
+    pidTmuxSession = newPidTmuxSession;
   }
 
   // Collect transcript paths claimed by hook events so fallback doesn't reuse them
@@ -196,7 +204,7 @@ export async function discoverSessions(): Promise<ClaudeSession[]> {
   const results = await Promise.all(
     processInfos
       .filter((info) => info.workingDirectory !== null)
-      .map((info) => buildSession(info, hookStatuses.get(info.pid), claimedPaths, orphanedPids.has(info.pid))),
+      .map((info) => buildSession(info, hookStatuses.get(info.pid), claimedPaths, orphanedPids.has(info.pid), pidTmuxSession.get(info.pid) ?? null)),
   );
 
   const sessions = results.filter((s): s is ClaudeSession => s !== null);

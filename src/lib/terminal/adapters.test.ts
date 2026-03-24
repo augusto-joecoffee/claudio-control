@@ -15,11 +15,11 @@ describe("adapter registry", () => {
 
     for (const app of knownApps) {
       const adapter = getAdapter(app);
-      expect(adapter).toBeDefined();
-      expect(typeof adapter.focus).toBe("function");
-      expect(typeof adapter.sendText).toBe("function");
-      expect(typeof adapter.sendKeystroke).toBe("function");
-      expect(typeof adapter.createSession).toBe("function");
+      expect(adapter).not.toBeNull();
+      expect(typeof adapter!.focus).toBe("function");
+      expect(typeof adapter!.sendText).toBe("function");
+      expect(typeof adapter!.sendKeystroke).toBe("function");
+      expect(typeof adapter!.createSession).toBe("function");
     }
   });
 
