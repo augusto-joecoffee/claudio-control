@@ -3,7 +3,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const http = require("http");
-const windowStateKeeper = require("electron-window-state");
+const fs = require("fs");
 
 const PORT = 3200;
 let nextProcess = null;
@@ -168,31 +168,89 @@ ipcMain.handle("dialog:pickFolder", async () => {
   return { path: result.filePaths[0] };
 });
 
-function isPositionOnScreen(x, y) {
-  if (x === undefined || y === undefined) return false;
+function getWindowStatePath() {
+  return path.join(app.getPath("userData"), "window-state.json");
+}
+
+function loadWindowState() {
+  try {
+    return JSON.parse(fs.readFileSync(getWindowStatePath(), "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function saveWindowState(win) {
+  if (!win || win.isDestroyed()) return;
+
+  const isMaximized = win.isMaximized();
+  const isFullScreen = win.isFullScreen();
+
+  // Get the display the window is currently on
+  const bounds = win.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+
+  // Save normal (non-maximized) bounds so we can restore properly
+  const normalBounds = win.getNormalBounds();
+
+  const state = {
+    x: normalBounds.x,
+    y: normalBounds.y,
+    width: normalBounds.width,
+    height: normalBounds.height,
+    isMaximized,
+    isFullScreen,
+    displayId: display.id,
+    displayBounds: display.bounds,
+  };
+
+  fs.promises.writeFile(getWindowStatePath(), JSON.stringify(state, null, 2)).catch(() => {});
+}
+
+function findMatchingDisplay(savedState) {
+  if (!savedState) return null;
   const displays = screen.getAllDisplays();
-  return displays.some((display) => {
-    const { x: dx, y: dy, width, height } = display.bounds;
-    return x >= dx && x < dx + width && y >= dy && y < dy + height;
-  });
+
+  // Try to find the exact display by ID
+  const byId = displays.find((d) => d.id === savedState.displayId);
+  if (byId) return byId;
+
+  // Fall back: find a display at the same position (DisplayLink can reassign IDs)
+  if (savedState.displayBounds) {
+    const sb = savedState.displayBounds;
+    const byBounds = displays.find(
+      (d) => d.bounds.x === sb.x && d.bounds.y === sb.y && d.bounds.width === sb.width && d.bounds.height === sb.height,
+    );
+    if (byBounds) return byBounds;
+  }
+
+  return null;
 }
 
 function createWindow() {
-  const windowState = windowStateKeeper({
-    defaultWidth: 1400,
-    defaultHeight: 900,
-    fullScreen: true,
-  });
+  const savedState = loadWindowState();
+  const targetDisplay = findMatchingDisplay(savedState);
 
-  // Only restore position if it's on a currently visible display
-  const positionOpts = isPositionOnScreen(windowState.x, windowState.y)
-    ? { x: windowState.x, y: windowState.y }
-    : {};
+  let windowOpts = { width: 1400, height: 900 };
+
+  if (savedState && targetDisplay) {
+    // Restore size, position on the correct display
+    windowOpts = {
+      x: savedState.x,
+      y: savedState.y,
+      width: savedState.width,
+      height: savedState.height,
+    };
+  } else if (savedState) {
+    // Display gone — use saved size, let OS pick position
+    windowOpts = {
+      width: savedState.width,
+      height: savedState.height,
+    };
+  }
 
   mainWindow = new BrowserWindow({
-    ...positionOpts,
-    width: windowState.width,
-    height: windowState.height,
+    ...windowOpts,
     minWidth: 800,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
@@ -208,11 +266,32 @@ function createWindow() {
     show: false,
   });
 
-  windowState.manage(mainWindow);
   mainWindow.loadURL(`http://localhost:${PORT}`);
 
   mainWindow.once("ready-to-show", () => {
+    // Restore maximized/fullscreen after the window is on the correct display
+    if (savedState?.isFullScreen) {
+      mainWindow.setFullScreen(true);
+    } else if (savedState?.isMaximized && targetDisplay) {
+      mainWindow.maximize();
+    }
     mainWindow.show();
+
+    // Start tracking state only after the window is fully shown
+    // to avoid spurious saves during initial positioning
+    let saveTimeout;
+    const debouncedSave = () => {
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => saveWindowState(mainWindow), 1000);
+    };
+
+    mainWindow.on("resize", debouncedSave);
+    mainWindow.on("move", debouncedSave);
+    mainWindow.on("maximize", debouncedSave);
+    mainWindow.on("unmaximize", debouncedSave);
+    mainWindow.on("enter-full-screen", debouncedSave);
+    mainWindow.on("leave-full-screen", debouncedSave);
+    mainWindow.on("close", () => saveWindowState(mainWindow));
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
