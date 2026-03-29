@@ -76,7 +76,8 @@
       ]
     },
     "files": [
-      "electron/**/*"
+      "electron/**/*",
+      "!**/.DS_Store"
     ],
     "afterPack": "./scripts/after-pack.js"
   }
