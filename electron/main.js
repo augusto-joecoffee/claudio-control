@@ -3,6 +3,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const http = require("http");
+const windowStateKeeper = require("electron-window-state");
 
 const PORT = 3200;
 let nextProcess = null;
@@ -168,9 +169,16 @@ ipcMain.handle("dialog:pickFolder", async () => {
 });
 
 function createWindow() {
+  const windowState = windowStateKeeper({
+    defaultWidth: 1400,
+    defaultHeight: 900,
+  });
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    x: windowState.x,
+    y: windowState.y,
+    width: windowState.width,
+    height: windowState.height,
     minWidth: 800,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
@@ -186,6 +194,7 @@ function createWindow() {
     show: false,
   });
 
+  windowState.manage(mainWindow);
   mainWindow.loadURL(`http://localhost:${PORT}`);
 
   mainWindow.once("ready-to-show", () => {
