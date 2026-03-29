@@ -176,7 +176,7 @@ function createWindow() {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#050508",
-    icon: path.join(__dirname, "..", "public", "icon.png"),
+    icon: path.join(__dirname, "..", "public", "logo.png"),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
