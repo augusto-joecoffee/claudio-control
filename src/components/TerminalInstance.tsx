@@ -11,6 +11,7 @@ interface ElectronTerminalAPI {
   ptyWrite: (ptyId: number, data: string) => void;
   ptyResize: (ptyId: number, cols: number, rows: number) => void;
   ptyKill: (ptyId: number) => Promise<void>;
+  ptyReattach: (ptyId: number) => Promise<{ alive: boolean; buffer: string }>;
   onPtyData: (callback: (ptyId: number, data: string) => void) => () => void;
   onPtyExit: (callback: (ptyId: number, info: { exitCode: number; signal: number }) => void) => () => void;
   getFilePath: (file: File) => string;
@@ -25,11 +26,13 @@ function getElectronAPI(): ElectronTerminalAPI | null {
 export function TerminalInstance({
   entry,
   visible,
+  existingPtyId,
   onPtySpawned,
   onPtyExited,
 }: {
   entry: TerminalEntry;
   visible: boolean;
+  existingPtyId?: number | null;
   onPtySpawned: (dir: string, ptyId: number) => void;
   onPtyExited: (dir: string) => void;
 }) {
@@ -40,10 +43,10 @@ export function TerminalInstance({
   const [exited, setExited] = useState(false);
   const [dragging, setDragging] = useState(false);
 
-  // Spawn PTY and set up xterm on mount, clean up on unmount.
-  // Uses a `cancelled` flag to handle React 18 strict mode double-mount:
-  // if cleanup runs before the async ptySpawn resolves, the spawned PTY
-  // is killed immediately when the promise settles.
+  // Spawn or reattach PTY and set up xterm on mount.
+  // On unmount: cleanup xterm and listeners but DON'T kill the PTY —
+  // it stays alive in the main process for reattachment after route changes.
+  // PTY killing is handled explicitly by the parent (close button).
   useEffect(() => {
     let cancelled = false;
     const api = getElectronAPI();
@@ -97,51 +100,80 @@ export function TerminalInstance({
       }
     });
 
-    let ptyId: number | null = null;
     let cleanupData: (() => void) | null = null;
     let cleanupExit: (() => void) | null = null;
 
-    api
-      .ptySpawn({
-        cols: term.cols,
-        rows: term.rows,
-        cwd: entry.workingDirectory,
-        tmuxSession: entry.spawnCommand ? undefined : (entry.tmuxSession ?? undefined),
-        command: entry.spawnCommand,
-      })
-      .then((result) => {
-        if (cancelled) {
-          // Effect was cleaned up before spawn completed (React 18 strict mode).
-          // Kill the orphaned PTY immediately.
-          api.ptyKill(result.ptyId).catch(() => {});
-          return;
+    function attachToPty(id: number) {
+      ptyIdRef.current = id;
+
+      cleanupData = api!.onPtyData((evId, data) => {
+        if (evId === id) term.write(data);
+      });
+
+      cleanupExit = api!.onPtyExit((evId) => {
+        if (evId === id) {
+          term.write("\r\n\x1b[90m[Session ended]\x1b[0m\r\n");
+          setExited(true);
+          onPtyExited(entry.workingDirectory);
         }
+      });
 
-        ptyId = result.ptyId;
-        ptyIdRef.current = ptyId;
-        onPtySpawned(entry.workingDirectory, ptyId);
+      term.onData((data) => {
+        if (ptyIdRef.current !== null) api!.ptyWrite(ptyIdRef.current, data);
+      });
+    }
 
-        cleanupData = api.onPtyData((id, data) => {
-          if (id === ptyId) term.write(data);
-        });
-
-        cleanupExit = api.onPtyExit((id) => {
-          if (id === ptyId) {
-            term.write("\r\n\x1b[90m[Session ended]\x1b[0m\r\n");
+    // If we have an existing PTY, try to reattach; otherwise spawn fresh
+    if (existingPtyId != null) {
+      api.ptyReattach(existingPtyId)
+        .then((result) => {
+          if (cancelled) return;
+          if (result.alive) {
+            // Write buffered scrollback then attach for live data
+            if (result.buffer) term.write(result.buffer);
+            attachToPty(existingPtyId!);
+            onPtySpawned(entry.workingDirectory, existingPtyId!);
+            // Trigger resize to refresh terminal content
+            requestAnimationFrame(() => {
+              fitAddon.fit();
+              api!.ptyResize(existingPtyId!, term.cols, term.rows);
+            });
+          } else {
+            // PTY died while we were away — mark as exited
+            term.write("\x1b[90m[Session ended]\x1b[0m\r\n");
             setExited(true);
             onPtyExited(entry.workingDirectory);
           }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            term.write("\x1b[31mFailed to reattach terminal\x1b[0m\r\n");
+          }
         });
-
-        term.onData((data) => {
-          if (ptyId !== null) api.ptyWrite(ptyId, data);
+    } else {
+      api
+        .ptySpawn({
+          cols: term.cols,
+          rows: term.rows,
+          cwd: entry.workingDirectory,
+          tmuxSession: entry.spawnCommand ? undefined : (entry.tmuxSession ?? undefined),
+          command: entry.spawnCommand,
+        })
+        .then((result) => {
+          if (cancelled) {
+            // Effect was cleaned up before spawn completed (React 18 strict mode).
+            api.ptyKill(result.ptyId).catch(() => {});
+            return;
+          }
+          attachToPty(result.ptyId);
+          onPtySpawned(entry.workingDirectory, result.ptyId);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            term.write(`\x1b[31mFailed to spawn terminal: ${err.message}\x1b[0m\r\n`);
+          }
         });
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          term.write(`\x1b[31mFailed to spawn terminal: ${err.message}\x1b[0m\r\n`);
-        }
-      });
+    }
 
     const observer = new ResizeObserver(() => {
       requestAnimationFrame(() => {
@@ -161,10 +193,9 @@ export function TerminalInstance({
       term.dispose();
       termRef.current = null;
       fitAddonRef.current = null;
-      if (ptyIdRef.current !== null) {
-        api.ptyKill(ptyIdRef.current).catch(() => {});
-        ptyIdRef.current = null;
-      }
+      // DON'T kill PTY — it stays alive for reattachment.
+      // PTY killing is handled by explicit close actions.
+      ptyIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry.workingDirectory]);

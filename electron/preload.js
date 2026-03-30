@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   ptyWrite: (ptyId, data) => ipcRenderer.send("pty:write", { ptyId, data }),
   ptyResize: (ptyId, cols, rows) => ipcRenderer.send("pty:resize", { ptyId, cols, rows }),
   ptyKill: (ptyId) => ipcRenderer.invoke("pty:kill", { ptyId }),
+  ptyReattach: (ptyId) => ipcRenderer.invoke("pty:reattach", { ptyId }),
   onPtyData: (callback) => {
     const listener = (_event, ptyId, data) => callback(ptyId, data);
     ipcRenderer.on("pty:data", listener);

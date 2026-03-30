@@ -16,6 +16,8 @@ const PORT = 3200;
 let nextProcess = null;
 let ptyIdCounter = 0;
 const ptyProcesses = new Map();
+const ptyBuffers = new Map(); // ptyId → string (scrollback buffer for reattach)
+const PTY_BUFFER_LIMIT = 100_000; // ~100KB per terminal
 
 // Recursively kill a process and all its descendants (depth-first)
 function killProcessTree(pid) {
@@ -217,13 +219,19 @@ ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command }) 
     env: { ...process.env },
   });
   ptyProcesses.set(id, ptyProc);
+  ptyBuffers.set(id, "");
   ptyProc.onData((data) => {
+    // Append to scrollback buffer (for reattach after route changes)
+    let buf = (ptyBuffers.get(id) || "") + data;
+    if (buf.length > PTY_BUFFER_LIMIT) buf = buf.slice(buf.length - PTY_BUFFER_LIMIT);
+    ptyBuffers.set(id, buf);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("pty:data", id, data);
     }
   });
   ptyProc.onExit(({ exitCode, signal }) => {
     ptyProcesses.delete(id);
+    ptyBuffers.delete(id);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("pty:exit", id, { exitCode, signal });
     }
@@ -241,6 +249,14 @@ ipcMain.on("pty:resize", (_event, { ptyId, cols, rows }) => {
   if (proc) proc.resize(cols, rows);
 });
 
+ipcMain.handle("pty:reattach", (_event, { ptyId }) => {
+  const proc = ptyProcesses.get(ptyId);
+  if (proc) {
+    return { alive: true, buffer: ptyBuffers.get(ptyId) || "" };
+  }
+  return { alive: false, buffer: "" };
+});
+
 ipcMain.handle("pty:kill", async (_event, { ptyId }) => {
   const proc = ptyProcesses.get(ptyId);
   if (proc) {
@@ -248,6 +264,7 @@ ipcMain.handle("pty:kill", async (_event, { ptyId }) => {
     killProcessTree(rootPid);
     proc.kill();
     ptyProcesses.delete(ptyId);
+    ptyBuffers.delete(ptyId);
     // Force-kill any survivors after a short delay
     setTimeout(() => {
       try {

@@ -45,6 +45,7 @@ export function QuickActions({
   onCleanup,
   onOpenTerminal,
   hasActiveTerminal,
+  hasInlineTerminal,
 }: {
   path: string;
   pid?: number | null;
@@ -56,6 +57,7 @@ export function QuickActions({
   onCleanup?: (e: React.MouseEvent) => void;
   onOpenTerminal?: () => void;
   hasActiveTerminal?: boolean;
+  hasInlineTerminal?: boolean;
 }) {
   const [prSending, setPrSending] = useState(false);
   const [killing, setKilling] = useState(false);
@@ -227,11 +229,11 @@ export function QuickActions({
         <IconButton onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (onOpenTerminal && (hasActiveTerminal || inlineTerminal)) {
-            // Inline mode: switch to / create terminal for this session
+          if (onOpenTerminal && (hasActiveTerminal || hasInlineTerminal)) {
+            // This session has an inline terminal — show/focus it
             onOpenTerminal();
           } else {
-            // Focus the external terminal (iTerm2, Terminal.app, etc.)
+            // No inline terminal for this session — focus the external terminal
             openAction(e, "focus");
           }
         }} tip={hasActiveTerminal ? "Show terminal" : "Terminal"} className={`flex-1 flex items-center justify-center h-8 rounded-lg border transition-all duration-150 ${

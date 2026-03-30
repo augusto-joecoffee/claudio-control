@@ -119,6 +119,7 @@ export function TerminalContainer({
             key={dir}
             entry={entry}
             visible={!minimized && dir === activeDir}
+            existingPtyId={entry.ptyId}
             onPtySpawned={onPtySpawned}
             onPtyExited={onPtyExited}
           />

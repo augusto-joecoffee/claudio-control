@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { KeyboardHints } from "@/components/KeyboardHints";
 import { NewSessionModal } from "@/components/NewSessionModal";
@@ -16,6 +16,7 @@ import { usePrStatus } from "@/hooks/usePrStatus";
 import { useSessions } from "@/hooks/useSessions";
 import { useSettings } from "@/hooks/useSettings";
 import { flattenGroupedSessions } from "@/lib/group-sessions";
+import { getTerminalStore, setTerminalStore } from "@/lib/terminal-store";
 import { ClaudeSession, SessionStatus, TerminalEntry, ViewMode } from "@/lib/types";
 
 const EMPTY_SET: Set<string> = new Set();
@@ -43,10 +44,13 @@ export default function Dashboard() {
   // Optimistic approve/reject state: sessionId → { action, timestamp }
   const [actedSessions, setActedSessions] = useState<Record<string, { action: "approve" | "reject"; at: number }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [terminals, setTerminals] = useState<Map<string, TerminalEntry>>(() => new Map());
-  const [activeTerminalDir, setActiveTerminalDir] = useState<string | null>(null);
-  const [terminalMinimized, setTerminalMinimized] = useState(false);
-  const [terminalHeight, setTerminalHeight] = useState(400);
+  const [terminals, setTerminals] = useState<Map<string, TerminalEntry>>(() => {
+    const stored = getTerminalStore();
+    return stored.terminals.size > 0 ? new Map(stored.terminals) : new Map();
+  });
+  const [activeTerminalDir, setActiveTerminalDir] = useState<string | null>(() => getTerminalStore().activeDir);
+  const [terminalMinimized, setTerminalMinimized] = useState(() => getTerminalStore().minimized);
+  const [terminalHeight, setTerminalHeight] = useState(() => getTerminalStore().height);
 
   const handleApproveReject = useCallback((sessionId: string, action: "approve" | "reject") => {
     setActedSessions((prev) => ({ ...prev, [sessionId]: { action, at: Date.now() } }));
@@ -118,6 +122,12 @@ export default function Dashboard() {
 
   const handleCloseTerminal = useCallback((dir: string) => {
     setTerminals((prev) => {
+      const entry = prev.get(dir);
+      // Explicitly kill the PTY when the user closes the terminal
+      if (entry?.ptyId != null) {
+        const api = (window as unknown as { electronAPI?: { ptyKill: (id: number) => Promise<void> } }).electronAPI;
+        api?.ptyKill(entry.ptyId).catch(() => {});
+      }
       const next = new Map(prev);
       next.delete(dir);
       return next;
@@ -196,6 +206,25 @@ export default function Dashboard() {
       return changed ? next : prev;
     });
   }, [sessions]);
+
+  // Sync terminal state to the global store so it survives route changes
+  useEffect(() => {
+    setTerminalStore({
+      terminals,
+      activeDir: activeTerminalDir,
+      minimized: terminalMinimized,
+      height: terminalHeight,
+    });
+  }, [terminals, activeTerminalDir, terminalMinimized, terminalHeight]);
+
+  // Set of session IDs that have an inline terminal (for focus logic)
+  const inlineTerminalSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of terminals.values()) {
+      if (!entry.exited) ids.add(entry.sessionId);
+    }
+    return ids;
+  }, [terminals]);
 
   const { selectedIndex, setSelectedIndex, selectedSession, actionFeedback } = useKeyboardShortcuts({
     sessions,
@@ -415,6 +444,7 @@ export default function Dashboard() {
           onReorderCards={reorderCards}
           onOpenTerminal={handleOpenTerminal}
           activeTerminalSessionId={activeTerminalDir && !terminalMinimized ? terminals.get(activeTerminalDir)?.sessionId ?? null : null}
+          inlineTerminalSessionIds={inlineTerminalSessionIds}
         />
       )}
 

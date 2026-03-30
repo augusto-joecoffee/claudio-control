@@ -67,6 +67,7 @@ export function SessionCard({
   onCancelEdit,
   onOpenTerminal,
   hasActiveTerminal,
+  hasInlineTerminal,
 }: {
   session: ClaudeSession;
   targetScreen?: number | null;
@@ -84,6 +85,7 @@ export function SessionCard({
   onCancelEdit?: () => void;
   onOpenTerminal?: () => void;
   hasActiveTerminal?: boolean;
+  hasInlineTerminal?: boolean;
 }) {
   const isSuppressed = !!actedOn;
   const showQuickReply = session.status === "waiting" && session.pid && !isSuppressed;
@@ -306,6 +308,7 @@ export function SessionCard({
               onCleanup={canCleanup ? handleCleanup : undefined}
               onOpenTerminal={onOpenTerminal}
               hasActiveTerminal={hasActiveTerminal}
+              hasInlineTerminal={hasInlineTerminal}
             />
           )}
         </div>

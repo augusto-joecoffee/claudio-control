@@ -128,6 +128,7 @@ export function SessionGrid({
   onReorderCards,
   onOpenTerminal,
   activeTerminalSessionId,
+  inlineTerminalSessionIds,
 }: {
   sessions: ClaudeSession[];
   viewMode: ViewMode;
@@ -149,6 +150,7 @@ export function SessionGrid({
   onReorderCards?: (repoPath: string, newOrder: string[]) => void;
   onOpenTerminal?: (session: ClaudeSession) => void;
   activeTerminalSessionId?: string | null;
+  inlineTerminalSessionIds?: Set<string>;
 }) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [activeDragType, setActiveDragType] = useState<"section" | "card" | null>(null);
@@ -249,6 +251,7 @@ export function SessionGrid({
         onCancelEdit={onCancelEdit}
         onOpenTerminal={onOpenTerminal ? () => onOpenTerminal(session) : undefined}
         hasActiveTerminal={activeTerminalSessionId === session.id}
+        hasInlineTerminal={inlineTerminalSessionIds?.has(session.id) ?? false}
       />
     );
   };
