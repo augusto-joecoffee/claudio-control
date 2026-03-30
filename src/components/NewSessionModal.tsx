@@ -282,9 +282,9 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
       onCreated?.();
 
       if (data.inline && onInlineSession) {
-        // Inline mode: the process hasn't started yet (PTY spawns it),
-        // so don't burst-refresh — normal polling will pick it up.
         onInlineSession(data.path, data.prompt ?? undefined);
+        // Burst-refresh to detect the inline process quickly once PTY spawns it.
+        refreshAfterAction();
       } else {
         // External terminal: burst-refresh to detect the new process quickly.
         refreshAfterAction();

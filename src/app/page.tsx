@@ -94,13 +94,14 @@ export default function Dashboard() {
     const dir = session.workingDirectory;
     setTerminals((prev) => {
       const existing = prev.get(dir);
-      if (existing) {
-        // Terminal exists for this dir — update sessionId to the clicked session
+      if (existing && !existing.exited) {
+        // Live terminal exists for this dir — just switch focus
         if (existing.sessionId === session.id) return prev;
         const next = new Map(prev);
         next.set(dir, { ...existing, sessionId: session.id });
         return next;
       }
+      // No terminal or previous one exited — create a fresh entry
       const next = new Map(prev);
       next.set(dir, {
         sessionId: session.id,

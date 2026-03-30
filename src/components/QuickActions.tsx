@@ -97,7 +97,7 @@ export function QuickActions({
     setTimeout(() => setReattaching(false), 3000);
   };
 
-  const { editorAvailable, gitGuiAvailable } = useSettings();
+  const { editorAvailable, gitGuiAvailable, inlineTerminal } = useSettings();
 
   const openAction = async (e: React.MouseEvent, action: string) => {
     e.preventDefault();
@@ -227,8 +227,8 @@ export function QuickActions({
         <IconButton onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (hasActiveTerminal && onOpenTerminal) {
-            // Session already has an inline terminal open — focus it
+          if (onOpenTerminal && (hasActiveTerminal || inlineTerminal)) {
+            // Inline mode: switch to / create terminal for this session
             onOpenTerminal();
           } else {
             // Focus the external terminal (iTerm2, Terminal.app, etc.)
