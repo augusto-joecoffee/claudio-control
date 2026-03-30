@@ -13,6 +13,7 @@ interface ElectronTerminalAPI {
   ptyKill: (ptyId: number) => Promise<void>;
   onPtyData: (callback: (ptyId: number, data: string) => void) => () => void;
   onPtyExit: (callback: (ptyId: number, info: { exitCode: number; signal: number }) => void) => () => void;
+  getFilePath: (file: File) => string;
 }
 
 function getElectronAPI(): ElectronTerminalAPI | null {
@@ -200,21 +201,26 @@ export function TerminalInstance({
     e.preventDefault();
     e.stopPropagation();
     setDragging(false);
+    const term = termRef.current;
     const api = getElectronAPI();
     const id = ptyIdRef.current;
     const dt = "nativeEvent" in e ? (e as React.DragEvent).nativeEvent.dataTransfer : e.dataTransfer;
-    if (!api || id === null || !dt) return;
+    if (!term || !api || id === null || !dt) return;
 
     const files = Array.from(dt.files);
     if (files.length === 0) return;
 
     const paths = files
-      .map((f) => (f as File & { path?: string }).path)
-      .filter(Boolean) as string[];
+      .map((f) => api.getFilePath(f))
+      .filter(Boolean);
     if (paths.length > 0) {
-      // Shell-escape paths that contain spaces, then write to PTY
+      // Shell-escape paths that contain spaces, then send to the PTY
+      // wrapped in explicit bracketed paste sequences so Claude Code
+      // (and other apps that enable DECSET 2004) detect the file drop.
       const escaped = paths.map((p) => (p.includes(" ") ? `"${p}"` : p));
-      api.ptyWrite(id, escaped.join(" "));
+      const text = escaped.join(" ");
+      api.ptyWrite(id, `\x1b[200~${text}\x1b[201~`);
+      term.focus();
     }
   };
 
@@ -262,7 +268,6 @@ export function TerminalInstance({
         <div
           className="absolute inset-0 z-50 flex items-center justify-center bg-blue-500/10 border-2 border-dashed border-blue-500/50 rounded"
           onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => handleDrop(e)}
         >
           <span className="text-blue-400 text-sm font-medium pointer-events-none">Drop file to paste path</span>
         </div>

@@ -203,7 +203,8 @@ ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command }) 
     args = ["attach-session", "-t", tmuxSession];
   } else if (command) {
     shell = process.env.SHELL || "/bin/zsh";
-    args = ["-c", command];
+    const nvmInit = '. ~/.nvm/nvm.sh 2>/dev/null; ';
+    args = ["-c", nvmInit + command];
   } else {
     shell = process.env.SHELL || "/bin/zsh";
     args = [];

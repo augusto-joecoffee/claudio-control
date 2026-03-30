@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("pty:exit", listener);
     return () => ipcRenderer.removeListener("pty:exit", listener);
   },
+  getFilePath: (file) => webUtils.getPathForFile(file),
 });
