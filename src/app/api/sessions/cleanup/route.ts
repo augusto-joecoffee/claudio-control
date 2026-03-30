@@ -1,6 +1,7 @@
 import { execFile } from "child_process";
 import { NextResponse } from "next/server";
 import { promisify } from "util";
+import { invalidateSessionCache } from "@/lib/discovery";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,6 +109,7 @@ export async function POST(request: Request) {
       await deleteBranch(workingDirectory, branch);
     }
 
+    invalidateSessionCache();
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);

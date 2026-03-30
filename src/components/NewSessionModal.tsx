@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { refreshAfterAction } from "@/lib/actions";
 
 interface RepoInfo {
   name: string;
@@ -278,6 +279,7 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated }: Prop
 
       onClose();
       onCreated?.();
+      refreshAfterAction();
     } catch {
       setError("Failed to create session");
       setLoading(false);

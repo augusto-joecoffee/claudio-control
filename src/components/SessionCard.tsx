@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { refreshAfterAction } from "@/lib/actions";
 import { ClaudeSession, PrStatus, SessionStatus } from "@/lib/types";
 import { GitSummary } from "./GitSummary";
 import { OutputPreview } from "./OutputPreview";
@@ -113,6 +114,7 @@ export function SessionCard({
         });
         if (res.ok) {
           setCleanupState("done");
+          refreshAfterAction();
         } else {
           setCleanupState("idle");
         }
