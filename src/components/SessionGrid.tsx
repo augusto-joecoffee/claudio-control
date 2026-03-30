@@ -126,6 +126,7 @@ export function SessionGrid({
   layout,
   onReorderSections,
   onReorderCards,
+  onOpenTerminal,
 }: {
   sessions: ClaudeSession[];
   viewMode: ViewMode;
@@ -145,6 +146,7 @@ export function SessionGrid({
   layout?: DashboardLayout | null;
   onReorderSections?: (newOrder: string[]) => void;
   onReorderCards?: (repoPath: string, newOrder: string[]) => void;
+  onOpenTerminal?: (session: ClaudeSession) => void;
 }) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [activeDragType, setActiveDragType] = useState<"section" | "card" | null>(null);
@@ -154,6 +156,16 @@ export function SessionGrid({
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  const rawGroups = groupSessions(sessions);
+  const groups = applyLayout(rawGroups, layout ?? null);
+
+  // Freeze groups during drag to prevent SWR poll from disrupting layout
+  const stableGroupsRef = useRef(groups);
+  if (!isDragging) {
+    stableGroupsRef.current = groups;
+  }
+  const displayGroups = stableGroupsRef.current;
 
   if (sessions.length === 0) {
     return (
@@ -174,16 +186,6 @@ export function SessionGrid({
       </div>
     );
   }
-
-  const rawGroups = groupSessions(sessions);
-  const groups = applyLayout(rawGroups, layout ?? null);
-
-  // Freeze groups during drag to prevent SWR poll from disrupting layout
-  const stableGroupsRef = useRef(groups);
-  if (!isDragging) {
-    stableGroupsRef.current = groups;
-  }
-  const displayGroups = stableGroupsRef.current;
 
   // Build a flat index map: session id → flat index (for keyboard shortcuts)
   const flatIndexMap = new Map<string, number>();
@@ -243,6 +245,7 @@ export function SessionGrid({
         onStartEdit={onStartEdit ? () => onStartEdit(session.id) : undefined}
         onSaveMeta={onSaveMeta ? (updates) => onSaveMeta(session.id, updates) : undefined}
         onCancelEdit={onCancelEdit}
+        onOpenTerminal={onOpenTerminal ? () => onOpenTerminal(session) : undefined}
       />
     );
   };

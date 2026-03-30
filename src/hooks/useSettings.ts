@@ -12,6 +12,7 @@ interface SettingsResponse {
     alwaysNotify: boolean;
     editor: string;
     gitGui: string;
+    terminalApp: string;
   };
   options: {
     editors: AppOption[];
@@ -38,5 +39,6 @@ export function useSettings() {
     alwaysNotify: data?.config?.alwaysNotify ?? false,
     editorAvailable: isAppAvailable(data?.options?.editors, data?.config?.editor),
     gitGuiAvailable: isAppAvailable(data?.options?.gitGuis, data?.config?.gitGui),
+    inlineTerminal: data?.config?.terminalApp === "inline",
   };
 }

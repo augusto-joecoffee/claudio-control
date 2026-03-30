@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { KeyboardHints } from "@/components/KeyboardHints";
 import { NewSessionModal } from "@/components/NewSessionModal";
+import { ResizeDivider } from "@/components/ResizeDivider";
 import { SessionGrid } from "@/components/SessionGrid";
+import { TerminalPanel } from "@/components/TerminalPanel";
 import { useDashboardLayout } from "@/hooks/useDashboardLayout";
 import { useDesktopNotification } from "@/hooks/useDesktopNotification";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -14,7 +16,7 @@ import { usePrStatus } from "@/hooks/usePrStatus";
 import { useSessions } from "@/hooks/useSessions";
 import { useSettings } from "@/hooks/useSettings";
 import { flattenGroupedSessions } from "@/lib/group-sessions";
-import { SessionStatus, ViewMode } from "@/lib/types";
+import { ClaudeSession, SessionStatus, ViewMode } from "@/lib/types";
 
 const EMPTY_SET: Set<string> = new Set();
 
@@ -41,6 +43,10 @@ export default function Dashboard() {
   // Optimistic approve/reject state: sessionId → { action, timestamp }
   const [actedSessions, setActedSessions] = useState<Record<string, { action: "approve" | "reject"; at: number }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [terminalSession, setTerminalSession] = useState<ClaudeSession | null>(null);
+  const [terminalHeight, setTerminalHeight] = useState(400);
+  const [terminalSpawnCommand, setTerminalSpawnCommand] = useState<string | undefined>(undefined);
+  const [terminalRestartKey, setTerminalRestartKey] = useState(0);
 
   const handleApproveReject = useCallback((sessionId: string, action: "approve" | "reject") => {
     setActedSessions((prev) => ({ ...prev, [sessionId]: { action, at: Date.now() } }));
@@ -82,6 +88,42 @@ export default function Dashboard() {
 
   const handleCancelEdit = useCallback(() => {
     setEditingSessionId(null);
+  }, []);
+
+  const handleOpenTerminal = useCallback((session: ClaudeSession) => {
+    setTerminalSpawnCommand(undefined);
+    setTerminalSession((prev) => {
+      if (!prev) return session; // No terminal open → open
+      if (prev.id === session.id) return null; // Same session → toggle close
+      if (prev.workingDirectory === session.workingDirectory) return session; // Same dir (inline→real) → update metadata, keep PTY
+      return session; // Different directory → switch
+    });
+  }, []);
+
+  const handleInlineSession = useCallback((cwd: string, prompt?: string) => {
+    const cmd = prompt ? `claude '${prompt.replace(/'/g, "'\\''")}'` : "claude";
+    setTerminalSpawnCommand(cmd);
+    // Create a minimal synthetic session for the terminal panel
+    setTerminalSession({
+      id: `inline-${Date.now()}`,
+      pid: null,
+      workingDirectory: cwd,
+      repoName: cwd.split("/").filter(Boolean).pop() || "session",
+      isWorktree: false,
+      parentRepo: null,
+      branch: null,
+      status: "working",
+      lastActivity: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      git: null,
+      preview: { lastUserMessage: null, lastAssistantText: null, assistantIsNewer: false, lastTools: [], messageCount: 0 },
+      hasPendingToolUse: false,
+      jsonlPath: null,
+      prUrl: null,
+      orphaned: false,
+      tmuxSession: null,
+      taskSummary: null,
+    });
   }, []);
 
   const { selectedIndex, setSelectedIndex, selectedSession, actionFeedback } = useKeyboardShortcuts({
@@ -248,7 +290,9 @@ export default function Dashboard() {
   }, [sessions, hooksActive, playChime, sendNotification, soundEnabled, notificationsEnabled]);
 
   return (
-    <>
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex-1 overflow-y-auto px-6 pt-10 pb-8">
+        <div className="max-w-[1400px] mx-auto">
       <DashboardHeader
         sessionCount={sessions.length}
         onNewSession={handleNewGlobal}
@@ -298,6 +342,7 @@ export default function Dashboard() {
           layout={layout}
           onReorderSections={reorderSections}
           onReorderCards={reorderCards}
+          onOpenTerminal={handleOpenTerminal}
         />
       )}
 
@@ -335,7 +380,23 @@ export default function Dashboard() {
         </div>
       )}
 
-      {modal && <NewSessionModal repoPath={modal.repoPath} repoName={modal.repoName} onClose={() => setModal(null)} onCreated={refresh} />}
-    </>
+      {modal && <NewSessionModal repoPath={modal.repoPath} repoName={modal.repoName} onClose={() => setModal(null)} onCreated={refresh} onInlineSession={handleInlineSession} />}
+        </div>
+      </div>
+
+      {terminalSession && (
+        <>
+          <ResizeDivider onResize={setTerminalHeight} />
+          <TerminalPanel
+            key={terminalSession.workingDirectory + terminalRestartKey}
+            session={terminalSession}
+            height={terminalHeight}
+            onClose={() => { setTerminalSession(null); setTerminalSpawnCommand(undefined); }}
+            onRelaunch={() => setTerminalRestartKey((k) => k + 1)}
+            spawnCommand={terminalSpawnCommand}
+          />
+        </>
+      )}
+    </div>
   );
 }

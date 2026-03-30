@@ -5,8 +5,17 @@ const net = require("net");
 const http = require("http");
 const fs = require("fs");
 
+let pty;
+try {
+  pty = require("node-pty");
+} catch (err) {
+  console.warn("node-pty not available:", err.message);
+}
+
 const PORT = 3200;
 let nextProcess = null;
+let ptyIdCounter = 0;
+const ptyProcesses = new Map();
 
 // Electron apps launched from Finder/dock get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin).
 // Augment it so child processes can find tools like `gh` installed via Homebrew or other managers.
@@ -168,6 +177,69 @@ ipcMain.handle("dialog:pickFolder", async () => {
   return { path: result.filePaths[0] };
 });
 
+// ── PTY IPC handlers ──
+
+ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command }) => {
+  if (!pty) throw new Error("node-pty is not available");
+  const id = ++ptyIdCounter;
+  let shell, args;
+  if (tmuxSession) {
+    shell = "tmux";
+    args = ["attach-session", "-t", tmuxSession];
+  } else if (command) {
+    shell = process.env.SHELL || "/bin/zsh";
+    args = ["-c", command];
+  } else {
+    shell = process.env.SHELL || "/bin/zsh";
+    args = [];
+  }
+  const ptyProc = pty.spawn(shell, args, {
+    name: "xterm-256color",
+    cols: cols || 80,
+    rows: rows || 24,
+    cwd: cwd || process.env.HOME,
+    env: { ...process.env },
+  });
+  ptyProcesses.set(id, ptyProc);
+  ptyProc.onData((data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("pty:data", id, data);
+    }
+  });
+  ptyProc.onExit(({ exitCode, signal }) => {
+    ptyProcesses.delete(id);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("pty:exit", id, { exitCode, signal });
+    }
+  });
+  return { ptyId: id };
+});
+
+ipcMain.on("pty:write", (_event, { ptyId, data }) => {
+  const proc = ptyProcesses.get(ptyId);
+  if (proc) proc.write(data);
+});
+
+ipcMain.on("pty:resize", (_event, { ptyId, cols, rows }) => {
+  const proc = ptyProcesses.get(ptyId);
+  if (proc) proc.resize(cols, rows);
+});
+
+ipcMain.handle("pty:kill", (_event, { ptyId }) => {
+  const proc = ptyProcesses.get(ptyId);
+  if (proc) {
+    proc.kill();
+    ptyProcesses.delete(ptyId);
+  }
+});
+
+function killAllPtys() {
+  for (const [id, proc] of ptyProcesses) {
+    try { proc.kill(); } catch {}
+    ptyProcesses.delete(id);
+  }
+}
+
 function getWindowStatePath() {
   return path.join(app.getPath("userData"), "window-state.json");
 }
@@ -300,6 +372,7 @@ function createWindow() {
   });
 
   mainWindow.on("closed", () => {
+    killAllPtys();
     mainWindow = null;
   });
 }
@@ -329,6 +402,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  killAllPtys();
   if (nextProcess) {
     nextProcess.kill();
     nextProcess = null;

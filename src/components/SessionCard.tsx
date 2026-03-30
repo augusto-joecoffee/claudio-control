@@ -65,6 +65,7 @@ export function SessionCard({
   onStartEdit,
   onSaveMeta,
   onCancelEdit,
+  onOpenTerminal,
 }: {
   session: ClaudeSession;
   targetScreen?: number | null;
@@ -80,6 +81,7 @@ export function SessionCard({
   onStartEdit?: () => void;
   onSaveMeta?: (updates: { title?: string; description?: string }) => void;
   onCancelEdit?: () => void;
+  onOpenTerminal?: () => void;
 }) {
   const isSuppressed = !!actedOn;
   const showQuickReply = session.status === "waiting" && session.pid && !isSuppressed;
@@ -300,6 +302,7 @@ export function SessionCard({
               orphaned={session.orphaned}
               tmuxSession={session.tmuxSession}
               onCleanup={canCleanup ? handleCleanup : undefined}
+              onOpenTerminal={onOpenTerminal}
             />
           )}
         </div>

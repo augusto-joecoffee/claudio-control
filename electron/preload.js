@@ -2,4 +2,20 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
+
+  // Terminal PTY API
+  ptySpawn: (opts) => ipcRenderer.invoke("pty:spawn", opts),
+  ptyWrite: (ptyId, data) => ipcRenderer.send("pty:write", { ptyId, data }),
+  ptyResize: (ptyId, cols, rows) => ipcRenderer.send("pty:resize", { ptyId, cols, rows }),
+  ptyKill: (ptyId) => ipcRenderer.invoke("pty:kill", { ptyId }),
+  onPtyData: (callback) => {
+    const listener = (_event, ptyId, data) => callback(ptyId, data);
+    ipcRenderer.on("pty:data", listener);
+    return () => ipcRenderer.removeListener("pty:data", listener);
+  },
+  onPtyExit: (callback) => {
+    const listener = (_event, ptyId, info) => callback(ptyId, info);
+    ipcRenderer.on("pty:exit", listener);
+    return () => ipcRenderer.removeListener("pty:exit", listener);
+  },
 });

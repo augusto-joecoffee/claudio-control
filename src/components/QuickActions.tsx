@@ -43,6 +43,7 @@ export function QuickActions({
   orphaned,
   tmuxSession,
   onCleanup,
+  onOpenTerminal,
 }: {
   path: string;
   pid?: number | null;
@@ -52,6 +53,7 @@ export function QuickActions({
   orphaned?: boolean;
   tmuxSession?: string | null;
   onCleanup?: (e: React.MouseEvent) => void;
+  onOpenTerminal?: () => void;
 }) {
   const [prSending, setPrSending] = useState(false);
   const [killing, setKilling] = useState(false);
@@ -93,7 +95,7 @@ export function QuickActions({
     setTimeout(() => setReattaching(false), 3000);
   };
 
-  const { editorAvailable, gitGuiAvailable } = useSettings();
+  const { editorAvailable, gitGuiAvailable, inlineTerminal } = useSettings();
 
   const openAction = async (e: React.MouseEvent, action: string) => {
     e.preventDefault();
@@ -220,7 +222,15 @@ export function QuickActions({
           </IconButton>
         </>
       ) : pid ? (
-        <IconButton onClick={(e) => openAction(e, "focus")} tip="Terminal" className={`flex-1 ${iconBtnClass}`}>
+        <IconButton onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (inlineTerminal && onOpenTerminal) {
+            onOpenTerminal();
+          } else {
+            openAction(e, "focus");
+          }
+        }} tip="Terminal" className={`flex-1 ${iconBtnClass}`}>
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path
               strokeLinecap="round"
