@@ -82,10 +82,17 @@ export function QuickActions({
 
   const [reattaching, setReattaching] = useState(false);
 
+  const { editorAvailable, gitGuiAvailable, inlineTerminal } = useSettings();
+
   const reattachSession = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!tmuxSession) return;
+    // In inline mode, reattach via the inline terminal panel
+    if (inlineTerminal && onOpenTerminal) {
+      onOpenTerminal();
+      return;
+    }
     setReattaching(true);
     try {
       await fetch("/api/sessions/reattach", {
@@ -98,8 +105,6 @@ export function QuickActions({
     }
     setTimeout(() => setReattaching(false), 3000);
   };
-
-  const { editorAvailable, gitGuiAvailable, inlineTerminal } = useSettings();
 
   const openAction = async (e: React.MouseEvent, action: string) => {
     e.preventDefault();

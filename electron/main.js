@@ -1,5 +1,8 @@
 const { app, BrowserWindow, screen, shell, utilityProcess, dialog, ipcMain } = require("electron");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(require("child_process").execFile);
+const crypto = require("crypto");
 const path = require("path");
 const net = require("net");
 const http = require("http");
@@ -17,7 +20,42 @@ let nextProcess = null;
 let ptyIdCounter = 0;
 const ptyProcesses = new Map();
 const ptyBuffers = new Map(); // ptyId → string (scrollback buffer for reattach)
+const ptyTmuxNames = new Map(); // ptyId → tmux session name (or null)
 const PTY_BUFFER_LIMIT = 100_000; // ~100KB per terminal
+
+function inlineTmuxName(cwd) {
+  const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
+  return `claudio-inline-${hash}`;
+}
+
+// Manifest file for persisting tmux session → original cwd mapping
+function getInlineTmuxManifestPath() {
+  return path.join(app.getPath("userData"), "inline-tmux-sessions.json");
+}
+
+function loadInlineTmuxManifest() {
+  try {
+    return JSON.parse(fs.readFileSync(getInlineTmuxManifestPath(), "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveInlineTmuxManifest(manifest) {
+  fs.writeFileSync(getInlineTmuxManifestPath(), JSON.stringify(manifest, null, 2));
+}
+
+function addToInlineTmuxManifest(sessionName, cwd) {
+  const manifest = loadInlineTmuxManifest();
+  manifest[sessionName] = cwd;
+  saveInlineTmuxManifest(manifest);
+}
+
+function removeFromInlineTmuxManifest(sessionName) {
+  const manifest = loadInlineTmuxManifest();
+  delete manifest[sessionName];
+  saveInlineTmuxManifest(manifest);
+}
 
 // Recursively kill a process and all its descendants (depth-first)
 function killProcessTree(pid) {
@@ -196,14 +234,54 @@ ipcMain.handle("dialog:pickFolder", async () => {
 
 // ── PTY IPC handlers ──
 
-ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command }) => {
+ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command, wrapInTmux }) => {
   if (!pty) throw new Error("node-pty is not available");
   const id = ++ptyIdCounter;
+  console.log(`[pty:spawn] id=${id} wrapInTmux=${wrapInTmux} tmuxSession=${tmuxSession} command=${command ? command.slice(0, 50) : "none"}`);
   let shell, args;
   if (tmuxSession) {
+    // Reattach to an existing named tmux session (external or recovered inline)
     shell = "tmux";
     args = ["attach-session", "-t", tmuxSession];
+    ptyTmuxNames.set(id, tmuxSession);
+  } else if (command && wrapInTmux) {
+    // Inline terminal with tmux wrapping (terminalUseTmux is ON)
+    // Step 1: Create the tmux session DETACHED so it's fully independent.
+    // tmux runs the command in its default shell, so we just pass the full string.
+    const sessionName = inlineTmuxName(cwd || process.env.HOME);
+    const nvmInit = '. ~/.nvm/nvm.sh 2>/dev/null; ';
+    const innerCmd = nvmInit + command;
+    // Check if session already exists (e.g. recovery); if not, create it detached
+    let sessionExists = false;
+    try {
+      execFileSync("tmux", ["has-session", "-t", sessionName], { timeout: 3000 });
+      sessionExists = true;
+      console.log(`[pty:spawn] tmux session ${sessionName} already exists, attaching`);
+    } catch {
+      console.log(`[pty:spawn] tmux session ${sessionName} does not exist`);
+    }
+    if (!sessionExists) {
+      try {
+        console.log(`[pty:spawn] creating detached tmux session: ${sessionName}`);
+        console.log(`[pty:spawn] cwd=${cwd} innerCmd=${innerCmd}`);
+        execFileSync("tmux", [
+          "new-session", "-d", "-s", sessionName,
+          "-x", String(cols || 80), "-y", String(rows || 24),
+          "-c", cwd || process.env.HOME,
+          innerCmd,
+        ], { timeout: 5000, encoding: "utf-8" });
+        console.log(`[pty:spawn] tmux session created successfully`);
+      } catch (err) {
+        console.error(`[pty:spawn] FAILED to create tmux session:`, err.message, err.stderr);
+      }
+    }
+    // Step 2: Attach as a client via node-pty (this is the process we control)
+    shell = "tmux";
+    args = ["attach-session", "-t", sessionName];
+    ptyTmuxNames.set(id, sessionName);
+    addToInlineTmuxManifest(sessionName, cwd || process.env.HOME);
   } else if (command) {
+    // Raw PTY inline terminal (tmux setting OFF)
     shell = process.env.SHELL || "/bin/zsh";
     const nvmInit = '. ~/.nvm/nvm.sh 2>/dev/null; ';
     args = ["-c", nvmInit + command];
@@ -232,6 +310,7 @@ ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command }) 
   ptyProc.onExit(({ exitCode, signal }) => {
     ptyProcesses.delete(id);
     ptyBuffers.delete(id);
+    ptyTmuxNames.delete(id);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("pty:exit", id, { exitCode, signal });
     }
@@ -257,32 +336,96 @@ ipcMain.handle("pty:reattach", (_event, { ptyId }) => {
   return { alive: false, buffer: "" };
 });
 
-ipcMain.handle("pty:kill", async (_event, { ptyId }) => {
+ipcMain.handle("pty:kill", async (_event, { ptyId, killTmuxSession }) => {
   const proc = ptyProcesses.get(ptyId);
+  const tmuxName = ptyTmuxNames.get(ptyId);
+
+  // Only kill the tmux session when explicitly requested (user clicked X).
+  // React strict mode and other cleanup paths should only kill the client.
+  if (tmuxName && killTmuxSession) {
+    try { execFileSync("tmux", ["kill-session", "-t", tmuxName], { timeout: 5000 }); } catch {}
+    removeFromInlineTmuxManifest(tmuxName);
+  }
+  ptyTmuxNames.delete(ptyId);
+
   if (proc) {
     const rootPid = proc.pid;
-    killProcessTree(rootPid);
-    proc.kill();
+    if (tmuxName) {
+      // Tmux client: just kill the client, don't kill the process tree
+      try { proc.kill(); } catch {}
+    } else {
+      killProcessTree(rootPid);
+      proc.kill();
+    }
     ptyProcesses.delete(ptyId);
     ptyBuffers.delete(ptyId);
-    // Force-kill any survivors after a short delay
-    setTimeout(() => {
-      try {
-        process.kill(rootPid, 0); // throws if dead
-        process.kill(rootPid, "SIGKILL");
-      } catch {
-        // Already dead — good
+    if (!tmuxName) {
+      // Force-kill any survivors after a short delay (only for non-tmux)
+      setTimeout(() => {
+        try {
+          process.kill(rootPid, 0); // throws if dead
+          process.kill(rootPid, "SIGKILL");
+        } catch {
+          // Already dead — good
+        }
+      }, 1000);
+    }
+  }
+});
+
+ipcMain.handle("pty:listInlineTmux", async () => {
+  try {
+    const manifest = loadInlineTmuxManifest();
+    const { stdout } = await execFileAsync("tmux", [
+      "list-sessions", "-F", "#{session_name}\t#{pane_dead}",
+    ], { timeout: 5000 });
+    const liveSessions = stdout.trim().split("\n").filter(Boolean)
+      .map((line) => {
+        const [name, dead] = line.split("\t");
+        return { name, dead: dead === "1" };
+      })
+      .filter((s) => s.name.startsWith("claudio-inline-") && !s.dead);
+
+    // Use manifest to get original cwd; skip sessions without a manifest entry
+    const result = [];
+    for (const s of liveSessions) {
+      const cwd = manifest[s.name];
+      if (cwd) result.push({ name: s.name, cwd });
+    }
+    // Clean up manifest entries for sessions that no longer exist
+    const liveNames = new Set(liveSessions.map((s) => s.name));
+    let cleaned = false;
+    for (const key of Object.keys(manifest)) {
+      if (!liveNames.has(key)) {
+        delete manifest[key];
+        cleaned = true;
       }
-    }, 1000);
+    }
+    if (cleaned) saveInlineTmuxManifest(manifest);
+
+    return result;
+  } catch {
+    return []; // tmux not running or no sessions
   }
 });
 
 function killAllPtys() {
   for (const [id, proc] of ptyProcesses) {
-    try { killProcessTree(proc.pid); } catch {}
-    try { proc.kill(); } catch {}
+    const tmuxName = ptyTmuxNames.get(id);
+    console.log(`[killAllPtys] id=${id} tmuxName=${tmuxName}`);
+    if (tmuxName) {
+      // Tmux-backed: detach the client cleanly so the session survives.
+      // Using `tmux detach-client` is cleaner than killing the process,
+      // which sends SIGHUP that can propagate to the session.
+      try { execFileSync("tmux", ["detach-client", "-s", tmuxName], { timeout: 3000 }); } catch {}
+    } else {
+      // Raw PTY: kill the entire process tree
+      try { killProcessTree(proc.pid); } catch {}
+      try { proc.kill(); } catch {}
+    }
     ptyProcesses.delete(id);
   }
+  ptyTmuxNames.clear();
 }
 
 function getWindowStatePath() {

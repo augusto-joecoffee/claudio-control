@@ -24,6 +24,7 @@ const EMPTY_SET: Set<string> = new Set();
 export default function Dashboard() {
   const { sessions, isLoading, error, hooksActive, refresh } = useSessions();
   const { layout, reorderSections, reorderCards } = useDashboardLayout();
+  const settings = useSettings();
   const [targetScreen, setTargetScreen] = useState<number | null>(() => {
     if (typeof window === "undefined") return null;
     const saved = localStorage.getItem("targetScreen");
@@ -125,16 +126,17 @@ export default function Dashboard() {
       const entry = prev.get(dir);
       // Explicitly kill the PTY when the user closes the terminal
       if (entry?.ptyId != null) {
-        const api = (window as unknown as { electronAPI?: { ptyKill: (id: number) => Promise<void> } }).electronAPI;
-        api?.ptyKill(entry.ptyId).catch(() => {});
+        const api = (window as unknown as { electronAPI?: { ptyKill: (id: number, killTmuxSession?: boolean) => Promise<void> } }).electronAPI;
+        api?.ptyKill(entry.ptyId, true).catch(() => {});
       }
       const next = new Map(prev);
       next.delete(dir);
       return next;
     });
     setActiveTerminalDir((prev) => (prev === dir ? null : prev));
-    // Refresh session list after process dies
+    // Refresh session list after process dies (second refresh catches tmux kill propagation)
     setTimeout(() => refresh(), 1500);
+    setTimeout(() => refresh(), 4000);
   }, [refresh]);
 
   const handleMinimizeTerminal = useCallback(() => {
@@ -180,13 +182,14 @@ export default function Dashboard() {
         workingDirectory: dir,
         ptyId: null,
         spawnCommand: cmd,
+        wrapInTmux: settings.terminalUseTmux,
         exited: false,
       });
       return next;
     });
     setActiveTerminalDir(dir);
     setTerminalMinimized(false);
-  }, []);
+  }, [settings.terminalUseTmux]);
 
   // Keep inline terminal entries synced with the real session ID.
   // The session ID evolves: "inline-..." → "pid-XXXX" → real UUID.
@@ -196,7 +199,7 @@ export default function Dashboard() {
       let changed = false;
       const next = new Map(prev);
       for (const [dir, entry] of next) {
-        if (!entry.spawnCommand) continue; // only sync inline-spawned terminals
+        if (!entry.spawnCommand && !entry.tmuxSession) continue; // sync inline-spawned and recovered tmux terminals
         const real = sessions.find((s) => s.workingDirectory === dir && s.pid !== null);
         if (real && real.id !== entry.sessionId) {
           next.set(dir, { ...entry, sessionId: real.id });
@@ -216,6 +219,39 @@ export default function Dashboard() {
       height: terminalHeight,
     });
   }, [terminals, activeTerminalDir, terminalMinimized, terminalHeight]);
+
+  // Recover surviving tmux inline sessions on mount
+  useEffect(() => {
+    const api = (window as unknown as { electronAPI?: { ptyListInlineTmux?: () => Promise<Array<{ name: string; cwd: string; dead: boolean }>> } }).electronAPI;
+    if (!api?.ptyListInlineTmux) return;
+    api.ptyListInlineTmux().then((tmuxSessions) => {
+      if (!tmuxSessions?.length) return;
+      let firstDir: string | null = null;
+      setTerminals((prev) => {
+        const next = new Map(prev);
+        let added = false;
+        for (const s of tmuxSessions) {
+          if (next.has(s.cwd)) continue; // already tracked
+          next.set(s.cwd, {
+            sessionId: `recovered-${s.name}`,
+            workingDirectory: s.cwd,
+            ptyId: null,
+            tmuxSession: s.name,
+            wrapInTmux: true,
+            exited: false,
+          });
+          if (!firstDir) firstDir = s.cwd;
+          added = true;
+        }
+        if (!added) return prev;
+        return next;
+      });
+      if (firstDir) {
+        setActiveTerminalDir(firstDir);
+        setTerminalMinimized(false);
+      }
+    });
+  }, []);
 
   // Set of session IDs that have an inline terminal (for focus logic)
   const inlineTerminalSessionIds = useMemo(() => {
@@ -279,7 +315,7 @@ export default function Dashboard() {
     }
   }, [sessions, actedSessions]);
   const prStatuses = usePrStatus(sessions);
-  const { notifications: notificationsEnabled, notificationSound: soundEnabled, alwaysNotify } = useSettings();
+  const { notifications: notificationsEnabled, notificationSound: soundEnabled, alwaysNotify } = settings;
 
   // Track confirmed statuses (only update after a status has been stable for 2 polls)
   const rawStatuses = useRef<Map<string, SessionStatus>>(new Map());

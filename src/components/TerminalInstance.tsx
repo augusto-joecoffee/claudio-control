@@ -7,14 +7,15 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import type { TerminalEntry } from "@/lib/types";
 
 interface ElectronTerminalAPI {
-  ptySpawn: (opts: { cols: number; rows: number; cwd: string; tmuxSession?: string; command?: string }) => Promise<{ ptyId: number }>;
+  ptySpawn: (opts: { cols: number; rows: number; cwd: string; tmuxSession?: string; command?: string; wrapInTmux?: boolean }) => Promise<{ ptyId: number }>;
   ptyWrite: (ptyId: number, data: string) => void;
   ptyResize: (ptyId: number, cols: number, rows: number) => void;
-  ptyKill: (ptyId: number) => Promise<void>;
+  ptyKill: (ptyId: number, killTmuxSession?: boolean) => Promise<void>;
   ptyReattach: (ptyId: number) => Promise<{ alive: boolean; buffer: string }>;
   onPtyData: (callback: (ptyId: number, data: string) => void) => () => void;
   onPtyExit: (callback: (ptyId: number, info: { exitCode: number; signal: number }) => void) => () => void;
   getFilePath: (file: File) => string;
+  ptyListInlineTmux: () => Promise<Array<{ name: string; cwd: string; dead: boolean }>>;
 }
 
 function getElectronAPI(): ElectronTerminalAPI | null {
@@ -158,6 +159,7 @@ export function TerminalInstance({
           cwd: entry.workingDirectory,
           tmuxSession: entry.spawnCommand ? undefined : (entry.tmuxSession ?? undefined),
           command: entry.spawnCommand,
+          wrapInTmux: entry.wrapInTmux,
         })
         .then((result) => {
           if (cancelled) {

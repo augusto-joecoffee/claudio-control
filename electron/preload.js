@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   ptySpawn: (opts) => ipcRenderer.invoke("pty:spawn", opts),
   ptyWrite: (ptyId, data) => ipcRenderer.send("pty:write", { ptyId, data }),
   ptyResize: (ptyId, cols, rows) => ipcRenderer.send("pty:resize", { ptyId, cols, rows }),
-  ptyKill: (ptyId) => ipcRenderer.invoke("pty:kill", { ptyId }),
+  ptyKill: (ptyId, killTmuxSession) => ipcRenderer.invoke("pty:kill", { ptyId, killTmuxSession }),
   ptyReattach: (ptyId) => ipcRenderer.invoke("pty:reattach", { ptyId }),
   onPtyData: (callback) => {
     const listener = (_event, ptyId, data) => callback(ptyId, data);
@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("pty:exit", listener);
   },
   getFilePath: (file) => webUtils.getPathForFile(file),
+  ptyListInlineTmux: () => ipcRenderer.invoke("pty:listInlineTmux"),
 });

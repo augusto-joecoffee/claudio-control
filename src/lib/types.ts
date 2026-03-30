@@ -103,5 +103,6 @@ export interface TerminalEntry {
   ptyId: number | null;
   spawnCommand?: string;
   tmuxSession?: string;
+  wrapInTmux?: boolean;
   exited: boolean;
 }
