@@ -16,7 +16,7 @@ interface Props {
 
 export function KanbanGroupView({ repoName, sessions, renderCard }: Props) {
   const { config, addColumn, updateColumn, removeColumn } = useKanbanConfig(repoName);
-  const { state, moveCard, refreshState } = useKanbanState(repoName);
+  const { state, moveCard, unassignCard, refreshState } = useKanbanState(repoName);
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [showNewColumnEditor, setShowNewColumnEditor] = useState(false);
 
@@ -74,6 +74,7 @@ export function KanbanGroupView({ repoName, sessions, renderCard }: Props) {
         sessions={sessions}
         renderCard={renderCard}
         onMoveCard={handleMoveCard}
+        onUnstageCard={unassignCard}
         onEditColumn={handleEditColumn}
         onAddColumn={handleAddColumn}
       />

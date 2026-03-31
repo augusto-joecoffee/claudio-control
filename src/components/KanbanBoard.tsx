@@ -5,6 +5,7 @@ import {
   DragOverlay,
   PointerSensor,
   closestCorners,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -26,7 +27,7 @@ import { KanbanColumn } from "./KanbanColumn";
 
 // Draggable card wrapper for kanban boards
 function KanbanDraggableCard({ id, children }: { id: string; children: ReactNode }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
     data: { type: "kanban-card", sessionId: id },
   });
@@ -38,23 +39,43 @@ function KanbanDraggableCard({ id, children }: { id: string; children: ReactNode
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="group/sortable relative">
-      <div
-        ref={setActivatorNodeRef}
-        {...attributes}
-        {...listeners}
-        className="absolute left-0 top-0 bottom-0 w-6 flex items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover/sortable:opacity-100 transition-opacity z-10"
-      >
-        <svg className="w-3.5 h-4 text-zinc-600 hover:text-zinc-400" viewBox="0 0 14 16" fill="currentColor">
-          <circle cx="4" cy="2" r="1.5" />
-          <circle cx="10" cy="2" r="1.5" />
-          <circle cx="4" cy="8" r="1.5" />
-          <circle cx="10" cy="8" r="1.5" />
-          <circle cx="4" cy="14" r="1.5" />
-          <circle cx="10" cy="14" r="1.5" />
-        </svg>
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+      {children}
+    </div>
+  );
+}
+
+function UnstagedColumn({ sessions, renderCard }: { sessions: ClaudeSession[]; renderCard: (s: ClaudeSession) => ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: "column-__unstaged__",
+    data: { type: "kanban-unstaged" },
+  });
+
+  return (
+    <div className="flex flex-col min-w-[320px] max-w-[380px] flex-shrink-0">
+      <div className="flex items-center gap-2 mb-3 px-1">
+        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Unstaged</h3>
+        <span className="text-[10px] text-zinc-600 font-(family-name:--font-geist-mono)">
+          {sessions.length}
+        </span>
       </div>
-      <div className="pl-4 group-hover/sortable:pl-6 transition-[padding]">{children}</div>
+      <div
+        ref={setNodeRef}
+        className={`flex-1 min-h-[120px] rounded-lg border transition-colors p-2 space-y-3 ${
+          isOver
+            ? "border-zinc-500/50 bg-zinc-800/30"
+            : "border-zinc-800/50 bg-zinc-900/20"
+        }`}
+      >
+        {sessions.map((session) => (
+          <div key={session.id}>{renderCard(session)}</div>
+        ))}
+        {sessions.length === 0 && (
+          <div className="flex items-center justify-center h-20 text-zinc-700 text-xs">
+            Drop sessions here
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -65,6 +86,7 @@ interface KanbanBoardProps {
   sessions: ClaudeSession[];
   renderCard: (session: ClaudeSession) => ReactNode;
   onMoveCard: (sessionId: string, toColumnId: string) => void;
+  onUnstageCard: (sessionId: string) => void;
   onEditColumn: (columnId: string) => void;
   onAddColumn: () => void;
 }
@@ -75,6 +97,7 @@ export function KanbanBoard({
   sessions,
   renderCard,
   onMoveCard,
+  onUnstageCard,
   onEditColumn,
   onAddColumn,
 }: KanbanBoardProps) {
@@ -117,7 +140,9 @@ export function KanbanBoard({
 
     // Check if hovering over a column drop zone
     const overData = over.data.current;
-    if (overData?.type === "kanban-column") {
+    if (overData?.type === "kanban-unstaged") {
+      setOverColumnId("__unstaged__");
+    } else if (overData?.type === "kanban-column") {
       setOverColumnId(overData.columnId as string);
     } else if (overData?.type === "kanban-card") {
       // Hovering over a card — find which column that card is in
@@ -138,6 +163,11 @@ export function KanbanBoard({
     let targetColumnId: string | null = null;
 
     const overData = over.data.current;
+    if (overData?.type === "kanban-unstaged") {
+      const currentColumn = getColumnForSession(sessionId);
+      if (currentColumn) onUnstageCard(sessionId);
+      return;
+    }
     if (overData?.type === "kanban-column") {
       targetColumnId = overData.columnId as string;
     } else if (overData?.type === "kanban-card") {
@@ -167,24 +197,13 @@ export function KanbanBoard({
       onDragEnd={handleDragEnd}
     >
       <div className="flex gap-4 overflow-x-auto pb-2">
-        {/* Unassigned column (if there are unassigned sessions) */}
-        {unassignedSessions.length > 0 && (
-          <div className="flex flex-col min-w-[320px] max-w-[380px] flex-shrink-0">
-            <div className="flex items-center gap-2 mb-3 px-1">
-              <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Unassigned</h3>
-              <span className="text-[10px] text-zinc-600 font-(family-name:--font-geist-mono)">
-                {unassignedSessions.length}
-              </span>
-            </div>
-            <div className="flex-1 min-h-[120px] rounded-lg border border-zinc-800/50 bg-zinc-900/20 p-2 space-y-3">
-              {unassignedSessions.map((session) => (
-                <KanbanDraggableCard key={session.id} id={session.id}>
-                  {renderCard(session)}
-                </KanbanDraggableCard>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Unstaged column — always visible, droppable */}
+        <UnstagedColumn
+          sessions={unassignedSessions}
+          renderCard={(session) => (
+            <KanbanDraggableCard id={session.id}>{renderCard(session)}</KanbanDraggableCard>
+          )}
+        />
 
         {/* Kanban columns */}
         {config.columns.map((column, idx) => (

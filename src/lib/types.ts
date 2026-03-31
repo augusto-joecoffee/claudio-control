@@ -24,6 +24,7 @@ export interface ClaudeSession {
   git: GitSummary | null;
   preview: ConversationPreview;
   taskSummary: TaskSummary | null;
+  initialPrompt: string | null;
   hasPendingToolUse: boolean;
   jsonlPath: string | null;
   prUrl: string | null;
@@ -110,7 +111,7 @@ export interface TerminalEntry {
 // ── Kanban Pipeline ──
 
 export interface KanbanColumnInput {
-  /** Prompt template sent to the Claude session. Supports {{previousOutput}} interpolation. */
+  /** Prompt template sent to the Claude session. Supports {{previousOutput}} and {{initialPrompt}} interpolation. */
   promptTemplate?: string;
   /** File path to read and inject as context. Resolved relative to repo root. */
   filePath?: string;

@@ -110,7 +110,26 @@ export function useKanbanState(repoName: string | null) {
     [repoName],
   );
 
+  const unassignCard = useCallback(
+    (sessionId: string) => {
+      if (!repoName) return;
+      setLocalState((prev) => {
+        const s = prev ?? { placements: [], outputHistory: {} };
+        const placements = s.placements.filter((p) => p.sessionId !== sessionId);
+        const next = { ...s, placements };
+        mutate(next, false);
+        fetch(`/api/kanban/${encodeURIComponent(repoName)}/state`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        }).catch((err) => console.error("Failed to save state:", err));
+        return next;
+      });
+    },
+    [repoName, mutate],
+  );
+
   const refreshState = useCallback(() => mutate(), [mutate]);
 
-  return { state, moveCard, assignCard, refreshState };
+  return { state, moveCard, assignCard, unassignCard, refreshState };
 }

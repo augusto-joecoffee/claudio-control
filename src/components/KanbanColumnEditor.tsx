@@ -99,12 +99,12 @@ export function KanbanColumnEditor({ column, onSave, onDelete, onClose }: Props)
           <h3 className="text-xs font-semibold text-zinc-400 mb-3">Input (sent to session)</h3>
 
           <label className="block text-xs text-zinc-500 mb-1">
-            Prompt Template <span className="text-zinc-700">{"{{previousOutput}} available"}</span>
+            Prompt Template <span className="text-zinc-700">{"{{previousOutput}} {{initialPrompt}} available"}</span>
           </label>
           <textarea
             value={promptTemplate}
             onChange={(e) => setPromptTemplate(e.target.value)}
-            placeholder="Review the following code and provide feedback:\n\n{{previousOutput}}"
+            placeholder="Review the following code and provide feedback:\n\nOriginal task: {{initialPrompt}}\n\n{{previousOutput}}"
             rows={3}
             className="w-full px-3 py-2 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-(family-name:--font-geist-mono) resize-y"
           />

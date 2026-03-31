@@ -71,14 +71,17 @@ export async function extractColumnOutput(column: KanbanColumn, session: ClaudeS
 
 // ── Prompt building ──
 
-export function buildColumnPrompt(column: KanbanColumn, previousOutput: string | undefined): string {
+export function buildColumnPrompt(
+  column: KanbanColumn,
+  previousOutput: string | undefined,
+  initialPrompt: string | undefined,
+): string {
   const parts: string[] = [];
 
   if (column.input?.promptTemplate) {
-    const interpolated = column.input.promptTemplate.replace(
-      /\{\{previousOutput\}\}/g,
-      previousOutput ?? "",
-    );
+    const interpolated = column.input.promptTemplate
+      .replace(/\{\{previousOutput\}\}/g, previousOutput ?? "")
+      .replace(/\{\{initialPrompt\}\}/g, initialPrompt ?? "");
     parts.push(interpolated);
   }
 
@@ -96,6 +99,7 @@ export async function buildFullColumnPrompt(
   column: KanbanColumn,
   previousOutput: string | undefined,
   cwd: string,
+  initialPrompt?: string,
 ): Promise<string> {
   const parts: string[] = [];
 
@@ -125,12 +129,11 @@ export async function buildFullColumnPrompt(
     }
   }
 
-  // Add prompt template (with previousOutput interpolated)
+  // Add prompt template (with variables interpolated)
   if (column.input?.promptTemplate) {
-    const interpolated = column.input.promptTemplate.replace(
-      /\{\{previousOutput\}\}/g,
-      previousOutput ?? "",
-    );
+    const interpolated = column.input.promptTemplate
+      .replace(/\{\{previousOutput\}\}/g, previousOutput ?? "")
+      .replace(/\{\{initialPrompt\}\}/g, initialPrompt ?? "");
     parts.push(interpolated);
   }
 
@@ -178,7 +181,7 @@ export async function processIdleTransitions(
           storeOutput(state, placement.sessionId, currentColumn.id, output);
 
           const previousOutput = getLastOutput(state, placement.sessionId, currentColumn.id);
-          const prompt = await buildFullColumnPrompt(targetColumn, previousOutput, session.workingDirectory);
+          const prompt = await buildFullColumnPrompt(targetColumn, previousOutput, session.workingDirectory, session.initialPrompt ?? undefined);
 
           placement.columnId = targetColumn.id;
           placement.queuedColumnId = undefined;
@@ -207,7 +210,7 @@ export async function processIdleTransitions(
           storeOutput(state, placement.sessionId, currentColumn.id, output);
 
           const previousOutput = getLastOutput(state, placement.sessionId, currentColumn.id);
-          const prompt = await buildFullColumnPrompt(nextColumn, previousOutput, session.workingDirectory);
+          const prompt = await buildFullColumnPrompt(nextColumn, previousOutput, session.workingDirectory, session.initialPrompt ?? undefined);
 
           placement.columnId = nextColumn.id;
           placement.lastOutput = output;

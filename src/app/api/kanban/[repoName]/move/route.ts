@@ -60,7 +60,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
       placement.queuedColumnId = undefined;
 
       // Build and send prompt
-      const prompt = await buildFullColumnPrompt(targetColumn, previousOutput, session.workingDirectory);
+      const prompt = await buildFullColumnPrompt(targetColumn, previousOutput, session.workingDirectory, session.initialPrompt ?? undefined);
       await saveKanbanState(decoded, state);
 
       if (prompt) {
