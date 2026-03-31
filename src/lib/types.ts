@@ -96,3 +96,51 @@ export interface SessionGroup {
   repoPath: string;
   sessions: ClaudeSession[];
 }
+
+// ── Kanban Pipeline ──
+
+export interface KanbanColumnInput {
+  /** Prompt template sent to the Claude session. Supports {{previousOutput}} interpolation. */
+  promptTemplate?: string;
+  /** File path to read and inject as context. Resolved relative to repo root. */
+  filePath?: string;
+  /** Shell script whose stdout becomes additional input. Runs in the repo's working directory. */
+  script?: string;
+}
+
+export interface KanbanColumnOutput {
+  /** How to extract output when a session completes in this column. */
+  type: "file" | "script" | "git-diff" | "conversation";
+  /** For "file": path to read. For "script": command to run. */
+  value?: string;
+  /** Optional regex to extract a substring from the raw output. */
+  regex?: string;
+}
+
+export interface KanbanColumn {
+  id: string;
+  name: string;
+  input?: KanbanColumnInput;
+  output?: KanbanColumnOutput;
+  /** When true, cards auto-move to the next column when their session becomes idle. */
+  autoCascade: boolean;
+}
+
+export interface KanbanConfig {
+  columns: KanbanColumn[];
+}
+
+export interface KanbanCardPlacement {
+  sessionId: string;
+  columnId: string;
+  /** Target column when moved while session is working. Executed when session goes idle. */
+  queuedColumnId?: string;
+  /** Output extracted when the session last completed in this column. */
+  lastOutput?: string;
+}
+
+export interface KanbanState {
+  placements: KanbanCardPlacement[];
+  /** Accumulated outputs per session per column, for passing between pipeline stages. */
+  outputHistory: Record<string, Record<string, string>>;
+}
