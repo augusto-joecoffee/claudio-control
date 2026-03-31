@@ -41,7 +41,11 @@ console.log(`✓ Patches applied: worker=${workerOk}, index=${indexOk}`);
 
 let buildFailed = false;
 try {
-  execSync("npx next build", { stdio: "inherit" });
+  // Explicitly unset TURBOPACK to use webpack for production builds.
+  // Turbopack standalone output can have hydration issues in Electron.
+  const buildEnv = { ...process.env };
+  delete buildEnv.TURBOPACK;
+  execSync("npx next build --webpack", { stdio: "inherit", env: buildEnv });
 } catch {
   buildFailed = true;
 }
