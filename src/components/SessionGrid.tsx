@@ -293,7 +293,7 @@ export function SessionGrid({
             ))}
           </div>
         ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 items-start">
+          <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(340px,1fr))] items-start">
             {items.map((session) => (
               <SortableCard key={`session-${session.pid ?? session.id}`} id={session.id}>
                 {renderCard(session)}
@@ -387,7 +387,7 @@ export function SessionGrid({
     return viewMode === "list" ? (
       <div className="space-y-1">{displayGroups[0].sessions.map(renderRow)}</div>
     ) : (
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 items-start">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 items-start">
         {displayGroups[0].sessions.map(renderCard)}
       </div>
     );
@@ -459,7 +459,7 @@ export function SessionGrid({
 
           {/* Single-session groups: compact side-by-side layout */}
           {singleSessionGroups.length > 0 && viewMode === "grid" && (
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 items-start">
+            <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(340px,1fr))] items-start">
               {singleSessionGroups.map((group) => (
                 <SortableSection key={group.repoPath} id={group.repoPath} header={renderGroupHeader(group, false)}>
                   {renderCard(group.sessions[0])}
