@@ -77,6 +77,8 @@ async function startNextServer() {
     const serverPath = path.join(appDir, "server.js");
     console.log(`Starting standalone server via utilityProcess: ${serverPath}`);
 
+    // NOTE: If you add/change env vars here, also update SERVER_INTERNAL_ENV_VARS
+    // in src/lib/terminal/adapters/shared.ts so they don't leak into user terminals.
     nextProcess = utilityProcess.fork(serverPath, [], {
       env: {
         ...process.env,
