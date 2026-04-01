@@ -139,7 +139,7 @@ export function TerminalInstance({
         cleanupData = api!.onPtyData((evId, data) => {
           if (evId === id) {
             // Strip alternate buffer sequences so xterm.js stays in normal buffer
-            // with full scrollback. CLAUDE_CODE_NO_FLICKER=1 minimizes redraws.
+            // with full scrollback.
             const filtered = data.replace(/\x1b\[\?(?:47|1047|1049)[hl]/g, "");
             term.write(filtered);
           }
