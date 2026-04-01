@@ -25,6 +25,8 @@ import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { groupSessions } from "@/lib/group-sessions";
 import { ClaudeSession, PrStatus, ViewMode } from "@/lib/types";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EnableKanbanButton } from "./EnableKanbanButton";
+import { KanbanAwareGroup } from "./KanbanAwareGroup";
 import { SessionCard } from "./SessionCard";
 import { SessionRow } from "./SessionRow";
 import { SortableCard } from "./SortableCard";
@@ -373,6 +375,7 @@ export function SessionGrid({
             </svg>
           </button>
         )}
+        <EnableKanbanButton repoName={group.repoName} />
         <div className={`flex-1 h-px bg-linear-to-r ${accent.line} to-transparent`} />
       </div>
     );
@@ -451,7 +454,14 @@ export function SessionGrid({
           <div className="space-y-8">
             {displayGroups.map((group) => (
               <SortableSection key={group.repoPath} id={group.repoPath} header={renderGroupHeader(group)}>
-                {!collapsedGroups.has(group.repoPath) && renderSortableCards(group.sessions, group.repoPath)}
+                {!collapsedGroups.has(group.repoPath) && (
+                  <KanbanAwareGroup
+                    repoName={group.repoName}
+                    sessions={group.sessions}
+                    renderCard={renderCard}
+                    fallback={renderSortableCards(group.sessions, group.repoPath)}
+                  />
+                )}
               </SortableSection>
             ))}
           </div>
@@ -495,7 +505,14 @@ export function SessionGrid({
           {/* Multi-session groups: full-width with their own grid */}
           {multiSessionGroups.map((group) => (
             <SortableSection key={group.repoPath} id={group.repoPath} header={renderGroupHeader(group)}>
-              {!collapsedGroups.has(group.repoPath) && renderSortableCards(group.sessions, group.repoPath)}
+              {!collapsedGroups.has(group.repoPath) && (
+                <KanbanAwareGroup
+                  repoName={group.repoName}
+                  sessions={group.sessions}
+                  renderCard={renderCard}
+                  fallback={renderSortableCards(group.sessions, group.repoPath)}
+                />
+              )}
             </SortableSection>
           ))}
 
