@@ -24,6 +24,7 @@ function makeSession(overrides: Partial<ClaudeSession> = {}): ClaudeSession {
     },
     hasPendingToolUse: false,
     taskSummary: null,
+    initialPrompt: null,
     jsonlPath: null,
     prUrl: null,
     orphaned: false,

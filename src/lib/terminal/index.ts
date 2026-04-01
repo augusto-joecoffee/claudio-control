@@ -5,6 +5,7 @@ export {
   listTmuxSessions,
   sendKeystroke,
   sendText,
+  typeText,
 } from "./adapters";
 export {
   buildProcessTree,

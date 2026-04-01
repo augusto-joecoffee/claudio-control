@@ -29,7 +29,7 @@ export function useSessions() {
     };
   }, []);
 
-  const { data, error, isLoading, mutate } = useSWR<{ sessions: ClaudeSession[]; hooksActive?: boolean }>(
+  const { data, error, isLoading, mutate } = useSWR<{ sessions: ClaudeSession[]; hooksActive?: boolean; repoIds?: Record<string, string> }>(
     isOnDashboard ? "/api/sessions" : null,
     fetcher,
     {
@@ -42,6 +42,7 @@ export function useSessions() {
   return {
     sessions: data?.sessions ?? [],
     hooksActive: data?.hooksActive ?? false,
+    repoIds: data?.repoIds ?? {},
     error,
     isLoading,
     refresh: mutate,

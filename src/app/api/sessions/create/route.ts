@@ -5,6 +5,8 @@ import { NextResponse } from "next/server";
 import { promisify } from "util";
 import { loadConfig } from "@/lib/config";
 import { invalidateSessionCache } from "@/lib/discovery";
+import { getAllKanbanConfigs, loadKanbanState, saveKanbanState } from "@/lib/kanban-store";
+import { resolveRepoId } from "@/lib/repo-registry";
 import { createSession } from "@/lib/terminal";
 
 const execFileAsync = promisify(execFile);
@@ -126,14 +128,32 @@ export async function POST(request: Request) {
 
     const config = await loadConfig();
 
+    // Check if this repo has kanban enabled — if so, don't auto-submit the prompt.
+    // Store it as a pending prompt for columns to use via {{initialPrompt}}.
+    let effectivePrompt = prompt;
+    // Use repoPath (not targetPath) — worktrees have different names like "api-fix-bug"
+    const repoId = await resolveRepoId(repoPath);
+    if (effectivePrompt) {
+      const allConfigs = await getAllKanbanConfigs();
+      const kanbanConfig = allConfigs.get(repoId);
+      if (kanbanConfig && kanbanConfig.columns.length > 0) {
+        console.log(`[create-session] Kanban enabled for repo ${repoId} — storing prompt, session will start idle`);
+        const kanbanState = await loadKanbanState(repoId);
+        if (!kanbanState.pendingPrompts) kanbanState.pendingPrompts = {};
+        kanbanState.pendingPrompts[targetPath] = effectivePrompt;
+        await saveKanbanState(repoId, kanbanState);
+        effectivePrompt = undefined;
+      }
+    }
+
     if (config.terminalApp === "inline") {
       // Inline mode: skip external terminal, return info for client PTY
       invalidateSessionCache();
-      return NextResponse.json({ ok: true, path: targetPath, inline: true, prompt });
+      return NextResponse.json({ ok: true, path: targetPath, inline: true, prompt: effectivePrompt });
     }
 
     // Open terminal with claude in the target directory
-    await openTerminalWithClaude(targetPath, repoPath, prompt, tmuxSession);
+    await openTerminalWithClaude(targetPath, repoPath, effectivePrompt, tmuxSession);
 
     // Invalidate server cache so the next poll picks up the new session immediately
     invalidateSessionCache();

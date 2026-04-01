@@ -2,7 +2,7 @@ import { applyLayout } from "./apply-layout";
 import type { DashboardLayout } from "./dashboard-layout";
 import { ClaudeSession, SessionGroup } from "./types";
 
-export function groupSessions(sessions: ClaudeSession[]): SessionGroup[] {
+export function groupSessions(sessions: ClaudeSession[], repoIds?: Record<string, string>): SessionGroup[] {
   const groups = new Map<string, SessionGroup>();
 
   for (const session of sessions) {
@@ -10,7 +10,7 @@ export function groupSessions(sessions: ClaudeSession[]): SessionGroup[] {
     const repoName = repoPath.split("/").filter(Boolean).pop() || repoPath;
 
     if (!groups.has(repoPath)) {
-      groups.set(repoPath, { repoName, repoPath, sessions: [] });
+      groups.set(repoPath, { repoId: repoIds?.[repoPath] ?? "", repoName, repoPath, sessions: [] });
     }
     groups.get(repoPath)!.sessions.push(session);
   }

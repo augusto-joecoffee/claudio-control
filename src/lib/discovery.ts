@@ -8,6 +8,7 @@ import { getAllProcessInfos, ProcessInfo } from "./process-utils";
 import { loadSessionMeta } from "./session-meta";
 import {
   extractBranch,
+  extractInitialPrompt,
   extractPreview,
   extractSessionId,
   extractStartedAt,
@@ -91,6 +92,7 @@ async function buildSession(
   let mtime: Date | null = null;
   let lastActivity = new Date().toISOString();
   let taskSummary: ClaudeSession["taskSummary"] = null;
+  let initialPrompt: string | null = null;
 
   const [jsonlResult, git, mainWorktreePath] = await Promise.all([
     jsonlPath
@@ -111,6 +113,7 @@ async function buildSession(
     askingForInput = isAskingForInput(lines);
     pendingToolUse = hasPendingToolUse(lines);
     taskSummary = extractTaskSummary(headLines);
+    initialPrompt = extractInitialPrompt(headLines);
     if (mtime) lastActivity = mtime.toISOString();
   }
 
@@ -153,6 +156,7 @@ async function buildSession(
     preview,
     hasPendingToolUse: pendingToolUse,
     taskSummary,
+    initialPrompt,
     jsonlPath,
     prUrl,
     orphaned,

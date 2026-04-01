@@ -22,7 +22,7 @@ import { ClaudeSession, SessionStatus, TerminalEntry, ViewMode } from "@/lib/typ
 const EMPTY_SET: Set<string> = new Set();
 
 export default function Dashboard() {
-  const { sessions, isLoading, error, hooksActive, refresh } = useSessions();
+  const { sessions, isLoading, error, hooksActive, repoIds, refresh } = useSessions();
   const { layout, reorderSections, reorderCards } = useDashboardLayout();
   const settings = useSettings();
   const [targetScreen, setTargetScreen] = useState<number | null>(() => {
@@ -470,6 +470,7 @@ export default function Dashboard() {
       {!(isLoading && sessions.length === 0) && (
         <SessionGrid
           sessions={sessions}
+          repoIds={repoIds}
           viewMode={viewMode}
           targetScreen={targetScreen}
           freshlyChanged={freshlyChanged}

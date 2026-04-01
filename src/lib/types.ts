@@ -24,6 +24,7 @@ export interface ClaudeSession {
   git: GitSummary | null;
   preview: ConversationPreview;
   taskSummary: TaskSummary | null;
+  initialPrompt: string | null;
   hasPendingToolUse: boolean;
   jsonlPath: string | null;
   prUrl: string | null;
@@ -92,6 +93,7 @@ export interface ConversationMessage {
 }
 
 export interface SessionGroup {
+  repoId: string;
   repoName: string;
   repoPath: string;
   sessions: ClaudeSession[];
@@ -105,4 +107,64 @@ export interface TerminalEntry {
   tmuxSession?: string;
   wrapInTmux?: boolean;
   exited: boolean;
+}
+
+// ── Kanban Pipeline ──
+
+export interface KanbanColumnInput {
+  /** Prompt template sent to the Claude session. Supports {{previousOutput}} and {{initialPrompt}} interpolation. */
+  promptTemplate?: string;
+  /** File path to read and inject as context. Resolved relative to repo root. */
+  filePath?: string;
+  /** Shell script whose stdout becomes additional input. Runs in the repo's working directory. */
+  script?: string;
+}
+
+export interface KanbanColumnOutput {
+  /** How to extract output when a session completes in this column. */
+  type: "file" | "script" | "git-diff" | "conversation";
+  /** For "file": path to read. For "script": command to run. */
+  value?: string;
+  /** Optional regex to extract a substring from the raw output. */
+  regex?: string;
+}
+
+export interface KanbanColumn {
+  id: string;
+  name: string;
+  input?: KanbanColumnInput;
+  output?: KanbanColumnOutput;
+  /** Prompt sent to the session before it leaves this column. Supports {{initialPrompt}}. */
+  outputPrompt?: string;
+  /** When true, cards auto-move to the next column when their session becomes idle. */
+  autoCascade: boolean;
+}
+
+export interface KanbanConfig {
+  columns: KanbanColumn[];
+}
+
+export interface KanbanCardPlacement {
+  sessionId: string;
+  /** Stable process ID for re-matching after session ID changes. */
+  pid?: number;
+  columnId: string;
+  /** Target column when moved while session is working. Executed when session goes idle. */
+  queuedColumnId?: string;
+  /** When true, /clear is sent before the column prompt (first move from unstaged). */
+  clearOnMove?: boolean;
+  /** Output extracted when the session last completed in this column. */
+  lastOutput?: string;
+  /** The session's initial prompt, captured when it first enters the kanban. Persisted here because /clear wipes the JSONL source. */
+  initialPrompt?: string;
+  /** True when an output prompt has been sent and we're waiting for the session to finish before moving. */
+  pendingOutputPrompt?: boolean;
+}
+
+export interface KanbanState {
+  placements: KanbanCardPlacement[];
+  /** Accumulated outputs per session per column, for passing between pipeline stages. */
+  outputHistory: Record<string, Record<string, string>>;
+  /** Prompts stored at session creation for kanban-enabled repos (keyed by working directory). */
+  pendingPrompts?: Record<string, string>;
 }

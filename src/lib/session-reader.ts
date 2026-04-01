@@ -455,6 +455,8 @@ export function isAskingForInput(lines: JsonlLine[]): boolean {
   if (lower.includes("please confirm")) return true;
   if (lower.includes("which approach") || lower.includes("which option")) return true;
   if (lower.includes("do you want me to")) return true;
+  if (lower.includes("what should claude do instead")) return true;
+  if (lower.includes("interrupted")) return true;
   if (lower.includes("before i ") && fullText.includes("?")) return true;
   if (lower.includes("is that okay") || lower.includes("does that look right")) return true;
   if (
@@ -551,5 +553,28 @@ export function extractTaskSummary(headLines: JsonlLine[]): TaskSummary | null {
     };
   }
 
+  return null;
+}
+
+/**
+ * Extract the full initial prompt text from the early conversation lines.
+ * Returns the complete first user message (not truncated), or null if none found.
+ */
+export function extractInitialPrompt(headLines: JsonlLine[]): string | null {
+  for (const line of headLines) {
+    if (line.type !== "user" || !line.message) continue;
+    const content = line.message.content;
+    if (typeof content !== "string") continue;
+    let text = content.trim();
+    if (!text) continue;
+
+    if (isSystemMessage(text)) {
+      const cleaned = stripXmlTags(text);
+      if (!cleaned) continue;
+      text = cleaned;
+    }
+
+    return text;
+  }
   return null;
 }
