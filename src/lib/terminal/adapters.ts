@@ -32,9 +32,12 @@ export async function focusSession(info: TerminalInfo): Promise<void> {
 }
 
 export async function sendText(info: TerminalInfo, text: string): Promise<void> {
-  // tmux: send directly to the pane — works in background without focus
+  // tmux: send literal text then Enter separately for reliability with long/multiline text
   if (info.inTmux && info.tmux) {
-    await execFileAsync(getTmuxPathSync(), ["send-keys", "-t", info.tmux.paneId, text, "Enter"], {
+    await execFileAsync(getTmuxPathSync(), ["send-keys", "-t", info.tmux.paneId, "-l", text], {
+      timeout: PROCESS_TIMEOUT_MS,
+    });
+    await execFileAsync(getTmuxPathSync(), ["send-keys", "-t", info.tmux.paneId, "Enter"], {
       timeout: PROCESS_TIMEOUT_MS,
     });
     return;

@@ -139,6 +139,7 @@ function cleanEnvForTerminal() {
   for (const key of STRIP_FROM_TERMINAL_ENV) {
     delete env[key];
   }
+  env.CLAUDE_CODE_NO_FLICKER = "1";
   return env;
 }
 

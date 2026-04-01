@@ -26,4 +26,4 @@ export const PROMPT_CONFIRM_TIMEOUT_MS = 15_000;
 /** How long an output prompt can be pending before we force-complete the move. */
 export const OUTPUT_PROMPT_TIMEOUT_MS = 5 * 60_000;
 /** Settle time after sending Escape to clear the message bar before typing the next prompt. */
-export const CLEAR_SETTLE_MS = 100;
+export const CLEAR_SETTLE_MS = 300;
