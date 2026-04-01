@@ -4,7 +4,7 @@ import { join } from "path";
 import { promisify } from "util";
 import { CASCADE_SETTLE_MS, OUTPUT_PROMPT_TIMEOUT_MS, PROCESS_TIMEOUT_MS, PROMPT_CONFIRM_TIMEOUT_MS } from "./constants";
 import { getGitDiff } from "./git-info";
-import { sendPromptToSession } from "./kanban-executor";
+import { clearMessageBar, sendPromptToSession } from "./kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "./kanban-store";
 import type { ClaudeSession, KanbanColumn, KanbanState } from "./types";
 
@@ -155,15 +155,15 @@ export interface KanbanAction {
 const tickLocks = new Map<string, boolean>();
 
 export async function processIdleTransitions(
-  repoName: string,
+  repoId: string,
   sessions: ClaudeSession[],
 ): Promise<KanbanAction[]> {
-  if (tickLocks.get(repoName)) return [];
-  tickLocks.set(repoName, true);
+  if (tickLocks.get(repoId)) return [];
+  tickLocks.set(repoId, true);
 
   try {
-    const config = await loadKanbanConfig(repoName);
-    const state = await loadKanbanState(repoName);
+    const config = await loadKanbanConfig(repoId);
+    const state = await loadKanbanState(repoId);
     const actions: KanbanAction[] = [];
     let stateChanged = false;
     const now = Date.now();
@@ -313,14 +313,15 @@ export async function processIdleTransitions(
     }
 
     if (stateChanged) {
-      await saveKanbanState(repoName, state);
+      await saveKanbanState(repoId, state);
     }
 
-    // Execute actions: send prompts to sessions and record promptSentAt
+    // Execute actions: clear message bar, send prompts to sessions, and record promptSentAt
     for (const action of actions) {
       const session = sessions.find((s) => s.id === action.sessionId);
       if (session) {
         try {
+          await clearMessageBar(session);
           await sendPromptToSession(session, action.prompt);
           // Track when we sent this prompt to guard against race-window double-cascade
           const placement = state.placements.find((p) => p.sessionId === action.sessionId);
@@ -335,12 +336,12 @@ export async function processIdleTransitions(
 
     // Persist promptSentAt updates
     if (actions.length > 0) {
-      await saveKanbanState(repoName, state);
+      await saveKanbanState(repoId, state);
     }
 
     return actions;
   } finally {
-    tickLocks.delete(repoName);
+    tickLocks.delete(repoId);
   }
 }
 

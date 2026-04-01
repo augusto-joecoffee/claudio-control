@@ -5,8 +5,8 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ repoName: string }> }) {
-  const { repoName } = await params;
-  const decoded = decodeURIComponent(repoName);
+  const { repoName: repoId } = await params;
+  const decoded = decodeURIComponent(repoId);
   const state = await loadKanbanState(decoded);
 
   // Reconcile placements when session IDs change (e.g., after first message writes to JSONL).
@@ -34,9 +34,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ rep
 
 export async function PUT(request: Request, { params }: { params: Promise<{ repoName: string }> }) {
   try {
-    const { repoName } = await params;
+    const { repoName: repoId } = await params;
     const body = await request.json();
-    await saveKanbanState(decodeURIComponent(repoName), body);
+    await saveKanbanState(decodeURIComponent(repoId), body);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Failed to save kanban state:", error);

@@ -6,11 +6,11 @@ import { useState } from "react";
 import { KanbanColumnEditor } from "./KanbanColumnEditor";
 
 interface Props {
-  repoName: string;
+  repoId: string;
 }
 
-export function EnableKanbanButton({ repoName }: Props) {
-  const { config, addColumn } = useKanbanConfig(repoName);
+export function EnableKanbanButton({ repoId }: Props) {
+  const { config, addColumn } = useKanbanConfig(repoId);
   const [showEditor, setShowEditor] = useState(false);
 
   // Don't show the button if kanban is already configured

@@ -4,16 +4,16 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ repoName: string }> }) {
-  const { repoName } = await params;
-  const config = await loadKanbanConfig(decodeURIComponent(repoName));
+  const { repoName: repoId } = await params;
+  const config = await loadKanbanConfig(decodeURIComponent(repoId));
   return NextResponse.json(config);
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ repoName: string }> }) {
   try {
-    const { repoName } = await params;
+    const { repoName: repoId } = await params;
     const body = await request.json();
-    await saveKanbanConfig(decodeURIComponent(repoName), body);
+    await saveKanbanConfig(decodeURIComponent(repoId), body);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Failed to save kanban config:", error);

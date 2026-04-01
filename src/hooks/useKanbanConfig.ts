@@ -6,8 +6,8 @@ import useSWR from "swr";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-export function useKanbanConfig(repoName: string | null) {
-  const key = repoName ? `/api/kanban/${encodeURIComponent(repoName)}/config` : null;
+export function useKanbanConfig(repoId: string | null) {
+  const key = repoId ? `/api/kanban/${encodeURIComponent(repoId)}/config` : null;
   const { data, mutate } = useSWR<KanbanConfig>(key, fetcher, {
     revalidateOnFocus: false,
     refreshInterval: 0,
@@ -25,15 +25,15 @@ export function useKanbanConfig(repoName: string | null) {
 
   const saveToServer = useCallback(
     (updated: KanbanConfig) => {
-      if (!repoName) return;
+      if (!repoId) return;
       mutate(updated, false);
-      fetch(`/api/kanban/${encodeURIComponent(repoName)}/config`, {
+      fetch(`/api/kanban/${encodeURIComponent(repoId)}/config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated),
       }).catch((err) => console.error("Failed to save kanban config:", err));
     },
-    [repoName, mutate],
+    [repoId, mutate],
   );
 
   const addColumn = useCallback(

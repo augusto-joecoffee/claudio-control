@@ -14,64 +14,64 @@ const EMPTY_STATE: KanbanState = { placements: [], outputHistory: {} };
 const configCache = new Map<string, { data: KanbanConfig; mtime: number }>();
 const stateCache = new Map<string, { data: KanbanState; mtime: number }>();
 
-function configPath(repoName: string): string {
-  return join(KANBAN_DIR, `${repoName}.json`);
+function configPath(repoId: string): string {
+  return join(KANBAN_DIR, `${repoId}.json`);
 }
 
-function statePath(repoName: string): string {
-  return join(KANBAN_DIR, `${repoName}.state.json`);
+function statePath(repoId: string): string {
+  return join(KANBAN_DIR, `${repoId}.state.json`);
 }
 
 // ── Config (user-editable column definitions) ──
 
-export async function loadKanbanConfig(repoName: string): Promise<KanbanConfig> {
-  const file = configPath(repoName);
+export async function loadKanbanConfig(repoId: string): Promise<KanbanConfig> {
+  const file = configPath(repoId);
   try {
     const s = await stat(file);
-    const cached = configCache.get(repoName);
+    const cached = configCache.get(repoId);
     if (cached && cached.mtime === s.mtimeMs) return cached.data;
 
     const raw = await readFile(file, "utf-8");
     const data: KanbanConfig = { ...EMPTY_CONFIG, ...JSON.parse(raw) };
-    configCache.set(repoName, { data, mtime: s.mtimeMs });
+    configCache.set(repoId, { data, mtime: s.mtimeMs });
     return data;
   } catch {
     return { ...EMPTY_CONFIG };
   }
 }
 
-export async function saveKanbanConfig(repoName: string, config: KanbanConfig): Promise<void> {
+export async function saveKanbanConfig(repoId: string, config: KanbanConfig): Promise<void> {
   await mkdir(KANBAN_DIR, { recursive: true });
-  const file = configPath(repoName);
+  const file = configPath(repoId);
   await writeFile(file, JSON.stringify(config, null, 2));
   const s = await stat(file);
-  configCache.set(repoName, { data: config, mtime: s.mtimeMs });
+  configCache.set(repoId, { data: config, mtime: s.mtimeMs });
 }
 
 // ── State (runtime placements and output history) ──
 
-export async function loadKanbanState(repoName: string): Promise<KanbanState> {
-  const file = statePath(repoName);
+export async function loadKanbanState(repoId: string): Promise<KanbanState> {
+  const file = statePath(repoId);
   try {
     const s = await stat(file);
-    const cached = stateCache.get(repoName);
+    const cached = stateCache.get(repoId);
     if (cached && cached.mtime === s.mtimeMs) return cached.data;
 
     const raw = await readFile(file, "utf-8");
     const data: KanbanState = { ...EMPTY_STATE, ...JSON.parse(raw) };
-    stateCache.set(repoName, { data, mtime: s.mtimeMs });
+    stateCache.set(repoId, { data, mtime: s.mtimeMs });
     return data;
   } catch {
     return { ...EMPTY_STATE };
   }
 }
 
-export async function saveKanbanState(repoName: string, state: KanbanState): Promise<void> {
+export async function saveKanbanState(repoId: string, state: KanbanState): Promise<void> {
   await mkdir(KANBAN_DIR, { recursive: true });
-  const file = statePath(repoName);
+  const file = statePath(repoId);
   await writeFile(file, JSON.stringify(state, null, 2));
   const s = await stat(file);
-  stateCache.set(repoName, { data: state, mtime: s.mtimeMs });
+  stateCache.set(repoId, { data: state, mtime: s.mtimeMs });
 }
 
 // ── Batch: load all configs ──
@@ -82,10 +82,10 @@ export async function getAllKanbanConfigs(): Promise<Map<string, KanbanConfig>> 
     const files = await readdir(KANBAN_DIR);
     for (const file of files) {
       if (file.endsWith(".state.json") || !file.endsWith(".json")) continue;
-      const repoName = file.replace(/\.json$/, "");
-      const config = await loadKanbanConfig(repoName);
+      const repoId = file.replace(/\.json$/, "");
+      const config = await loadKanbanConfig(repoId);
       if (config.columns.length > 0) {
-        result.set(repoName, config);
+        result.set(repoId, config);
       }
     }
   } catch {

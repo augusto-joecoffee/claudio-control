@@ -1,6 +1,6 @@
 import { discoverSessions } from "@/lib/discovery";
 import { buildFullColumnPrompt, extractColumnOutput } from "@/lib/kanban-engine";
-import { sendPromptToSession } from "@/lib/kanban-executor";
+import { clearMessageBar, sendPromptToSession } from "@/lib/kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "@/lib/kanban-store";
 import { NextResponse } from "next/server";
 
@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, { params }: { params: Promise<{ repoName: string }> }) {
   try {
-    const { repoName } = await params;
-    const decoded = decodeURIComponent(repoName);
+    const { repoName: repoId } = await params;
+    const decoded = decodeURIComponent(repoId);
     const { sessionId, toColumnId } = (await request.json()) as {
       sessionId: string;
       toColumnId: string;
@@ -62,6 +62,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
         await saveKanbanState(decoded, state);
 
         try {
+          await clearMessageBar(session);
           await sendPromptToSession(session, outputPromptText);
         } catch (err) {
           console.error("Failed to send output prompt:", err);
@@ -92,7 +93,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
 
       // Fire prompt in background — don't block the response
       if (prompt) {
-        sendPromptToSession(session, prompt).catch((err) => console.error("Failed to send prompt:", err));
+        (async () => {
+          try {
+            await clearMessageBar(session);
+            await sendPromptToSession(session, prompt);
+          } catch (err) {
+            console.error("Failed to send prompt:", err);
+          }
+        })();
       }
 
       return NextResponse.json({ ok: true, queued: false, promptSent: !!prompt });

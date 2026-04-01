@@ -11,8 +11,8 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: Request, { params }: { params: Promise<{ repoName: string }> }) {
   try {
-    const { repoName } = await params;
-    const decoded = decodeURIComponent(repoName);
+    const { repoName: repoId } = await params;
+    const decoded = decodeURIComponent(repoId);
     const { workingDirectory } = (await request.json()) as { workingDirectory: string };
 
     const state = await loadKanbanState(decoded);

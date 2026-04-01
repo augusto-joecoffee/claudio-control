@@ -37,11 +37,18 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
   const [selectedRepo, setSelectedRepo] = useState<string>(repoPath || "");
   const [selectedRepoName, setSelectedRepoName] = useState<string>(repoName || "");
   // Check if the selected repo (or its parent for worktrees) has kanban enabled
-  const { data: kanbanRepos } = useSWR<string[]>("/api/kanban/repos", (url: string) => fetch(url).then((r) => r.json()));
-  const selectedDirName = (selectedRepo || repoPath || "").split("/").filter(Boolean).pop() || "";
-  // Match exact name or worktree prefix (e.g., "api-branch" starts with "api")
-  const kanbanRepoName = kanbanRepos?.find((r) => selectedDirName === r || selectedDirName.startsWith(r + "-")) ?? null;
-  const kanbanEnabled = kanbanRepoName !== null;
+  const { data: kanbanRepos } = useSWR<{ id: string; displayName: string; repoPath: string }[]>(
+    "/api/kanban/repos",
+    (url: string) => fetch(url).then((r) => r.json()),
+  );
+  const selectedPath = selectedRepo || repoPath || "";
+  const selectedDirName = selectedPath.split("/").filter(Boolean).pop() || "";
+  // Match by exact path, or by worktree prefix (e.g., "api-branch" directory starts with "api")
+  const kanbanRepoEntry = kanbanRepos?.find((r) =>
+    r.repoPath === selectedPath || selectedDirName.startsWith(r.displayName + "-"),
+  ) ?? null;
+  const kanbanRepoId = kanbanRepoEntry?.id ?? null;
+  const kanbanEnabled = kanbanRepoId !== null;
   const [repoFilter, setRepoFilter] = useState("");
   const [pickerOpen, setPickerOpen] = useState(!repoPath);
   const [needsSetup, setNeedsSetup] = useState(false);
@@ -268,7 +275,7 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
     try {
       const trimmedPrompt = (prompt ?? "").trim() || undefined;
       // When kanban is enabled, don't auto-submit the prompt — store it for columns to use
-      console.log("[NewSessionModal] kanbanEnabled:", kanbanEnabled, "kanbanRepoName:", kanbanRepoName, "selectedDirName:", selectedDirName);
+      console.log("[NewSessionModal] kanbanEnabled:", kanbanEnabled, "kanbanRepoId:", kanbanRepoId, "selectedDirName:", selectedDirName);
       const sendPrompt = kanbanEnabled ? undefined : trimmedPrompt;
 
       const res = await fetch("/api/sessions/create", {
@@ -291,14 +298,14 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
       }
 
       // Store the prompt in kanban pendingPrompts for column {{initialPrompt}} interpolation
-      if (kanbanEnabled && trimmedPrompt && kanbanRepoName) {
+      if (kanbanEnabled && trimmedPrompt && kanbanRepoId) {
         const targetPath = data.path || targetRepo;
-        fetch(`/api/kanban/${encodeURIComponent(kanbanRepoName)}/state`)
+        fetch(`/api/kanban/${encodeURIComponent(kanbanRepoId)}/state`)
           .then((r) => r.json())
           .then((state) => {
             const pendingPrompts = state.pendingPrompts || {};
             pendingPrompts[targetPath] = trimmedPrompt;
-            return fetch(`/api/kanban/${encodeURIComponent(kanbanRepoName!)}/state`, {
+            return fetch(`/api/kanban/${encodeURIComponent(kanbanRepoId!)}/state`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ ...state, pendingPrompts }),
@@ -309,7 +316,7 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
             const tryType = (attempts: number) => {
               if (attempts <= 0) return;
               setTimeout(() => {
-                fetch(`/api/kanban/${encodeURIComponent(kanbanRepoName!)}/type-prompt`, {
+                fetch(`/api/kanban/${encodeURIComponent(kanbanRepoId!)}/type-prompt`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ workingDirectory: targetPath }),

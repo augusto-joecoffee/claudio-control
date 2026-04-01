@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { discoverSessions } from "@/lib/discovery";
 import { areHooksInstalled, ensureHooksInstalled } from "@/lib/hooks-installer";
+import { resolveRepoIds } from "@/lib/repo-registry";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +15,14 @@ export async function GET() {
     }
 
     const sessions = await discoverSessions();
-    return NextResponse.json({ sessions, hooksActive: areHooksInstalled() });
+
+    // Resolve stable repo IDs for each unique repo path
+    const repoPaths = [...new Set(sessions.map((s) => s.parentRepo || s.workingDirectory))];
+    const repoIds = await resolveRepoIds(repoPaths);
+
+    return NextResponse.json({ sessions, hooksActive: areHooksInstalled(), repoIds });
   } catch (error) {
     console.error("Failed to discover sessions:", error);
-    return NextResponse.json({ sessions: [], hooksActive: false, error: "Discovery failed" }, { status: 500 });
+    return NextResponse.json({ sessions: [], hooksActive: false, repoIds: {}, error: "Discovery failed" }, { status: 500 });
   }
 }
