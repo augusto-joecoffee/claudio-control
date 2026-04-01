@@ -58,7 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
           .replace(/\{\{initialPrompt\}\}/g, placement.initialPrompt ?? session.initialPrompt ?? "");
 
         placement.queuedColumnId = toColumnId;
-        placement.pendingOutputPrompt = true;
+        placement.pendingOutputPrompt = Date.now();
         await saveKanbanState(decoded, state);
 
         try {

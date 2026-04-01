@@ -21,3 +21,7 @@ export const APPROVAL_SETTLE_MS = 3000;
 export const ORPHAN_CHECK_INTERVAL_MS = 30_000;
 /** How long a session must be idle (no JSONL activity) before auto-cascade triggers. */
 export const CASCADE_SETTLE_MS = 30_000;
+/** How long to wait for a sent prompt to be acknowledged (UserPromptSubmit) before allowing cascade. */
+export const PROMPT_CONFIRM_TIMEOUT_MS = 15_000;
+/** How long an output prompt can be pending before we force-complete the move. */
+export const OUTPUT_PROMPT_TIMEOUT_MS = 5 * 60_000;

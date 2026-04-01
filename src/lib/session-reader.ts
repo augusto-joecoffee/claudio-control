@@ -348,6 +348,23 @@ export function linesToConversation(lines: JsonlLine[]): ConversationMessage[] {
   return messages;
 }
 
+/**
+ * Returns the stop_reason from the last assistant message.
+ * "end_turn" = Claude chose to stop, "tool_use" = calling a tool, "max_tokens" = cut off.
+ */
+export function extractLastStopReason(lines: JsonlLine[]): string | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line.type === "progress" || line.type === "file-history-snapshot" || line.type === "system") continue;
+    if (!line.message) continue;
+    if (line.type === "assistant" && line.message.stop_reason) {
+      return line.message.stop_reason;
+    }
+    break;
+  }
+  return null;
+}
+
 export function lastMessageHasError(lines: JsonlLine[]): boolean {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
