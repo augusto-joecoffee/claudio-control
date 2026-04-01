@@ -93,6 +93,7 @@ export interface ConversationMessage {
 }
 
 export interface SessionGroup {
+  repoId: string;
   repoName: string;
   repoPath: string;
   sessions: ClaudeSession[];

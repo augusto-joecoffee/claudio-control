@@ -111,6 +111,7 @@ function buildAccentMap(groupNames: string[]): Map<string, (typeof REPO_ACCENTS)
 
 export function SessionGrid({
   sessions,
+  repoIds,
   viewMode,
   targetScreen,
   freshlyChanged,
@@ -133,6 +134,7 @@ export function SessionGrid({
   inlineTerminalSessionIds,
 }: {
   sessions: ClaudeSession[];
+  repoIds?: Record<string, string>;
   viewMode: ViewMode;
   targetScreen?: number | null;
   freshlyChanged?: Set<string>;
@@ -183,7 +185,7 @@ export function SessionGrid({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const rawGroups = groupSessions(sessions);
+  const rawGroups = groupSessions(sessions, repoIds);
   const groups = applyLayout(rawGroups, layout ?? null);
 
   // Freeze groups during drag to prevent SWR poll from disrupting layout
@@ -366,7 +368,7 @@ export function SessionGrid({
             </svg>
           </button>
         )}
-        <EnableKanbanButton repoName={group.repoName} />
+        <EnableKanbanButton repoId={group.repoId} />
         <div className={`flex-1 h-px bg-linear-to-r ${accent.line} to-transparent`} />
       </div>
     );
@@ -447,7 +449,7 @@ export function SessionGrid({
               <SortableSection key={group.repoPath} id={group.repoPath} header={renderGroupHeader(group)}>
                 {!collapsedGroups.has(group.repoPath) && (
                   <KanbanAwareGroup
-                    repoName={group.repoName}
+                    repoId={group.repoId}
                     sessions={group.sessions}
                     renderCard={renderCard}
                     fallback={renderSortableCards(group.sessions, group.repoPath)}
@@ -498,7 +500,7 @@ export function SessionGrid({
             <SortableSection key={group.repoPath} id={group.repoPath} header={renderGroupHeader(group)}>
               {!collapsedGroups.has(group.repoPath) && (
                 <KanbanAwareGroup
-                  repoName={group.repoName}
+                  repoId={group.repoId}
                   sessions={group.sessions}
                   renderCard={renderCard}
                   fallback={renderSortableCards(group.sessions, group.repoPath)}

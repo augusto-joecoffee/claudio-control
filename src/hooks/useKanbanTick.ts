@@ -10,7 +10,7 @@ import { useEffect, useRef } from "react";
  * 2. Any session has a queued move and is no longer working
  */
 export function useKanbanTick(
-  repoName: string | null,
+  repoId: string | null,
   sessions: ClaudeSession[],
   placements: KanbanCardPlacement[],
   onTickComplete?: () => void,
@@ -18,7 +18,7 @@ export function useKanbanTick(
   const previousStatuses = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
-    if (!repoName || sessions.length === 0) return;
+    if (!repoId || sessions.length === 0) return;
 
     const prev = previousStatuses.current;
     let shouldTick = false;
@@ -43,9 +43,9 @@ export function useKanbanTick(
     }
 
     if (shouldTick) {
-      fetch(`/api/kanban/${encodeURIComponent(repoName)}/tick`, { method: "POST" })
+      fetch(`/api/kanban/${encodeURIComponent(repoId)}/tick`, { method: "POST" })
         .then(() => onTickComplete?.())
         .catch((err) => console.error("Kanban tick failed:", err));
     }
-  }, [repoName, sessions, placements, onTickComplete]);
+  }, [repoId, sessions, placements, onTickComplete]);
 }

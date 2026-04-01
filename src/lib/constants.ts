@@ -21,3 +21,5 @@ export const APPROVAL_SETTLE_MS = 3000;
 export const ORPHAN_CHECK_INTERVAL_MS = 30_000;
 /** How long a session must be idle (no JSONL activity) before auto-cascade triggers. */
 export const CASCADE_SETTLE_MS = 30_000;
+/** Settle time after sending Escape to clear the message bar before typing the next prompt. */
+export const CLEAR_SETTLE_MS = 100;

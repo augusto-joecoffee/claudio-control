@@ -9,18 +9,18 @@ import { KanbanBoard } from "./KanbanBoard";
 import { KanbanColumnEditor } from "./KanbanColumnEditor";
 
 interface Props {
-  repoName: string;
+  repoId: string;
   sessions: ClaudeSession[];
   renderCard: (session: ClaudeSession) => ReactNode;
 }
 
-export function KanbanGroupView({ repoName, sessions, renderCard }: Props) {
-  const { config, addColumn, updateColumn, removeColumn } = useKanbanConfig(repoName);
-  const { state, moveCard, unassignCard, refreshState } = useKanbanState(repoName);
+export function KanbanGroupView({ repoId, sessions, renderCard }: Props) {
+  const { config, addColumn, updateColumn, removeColumn } = useKanbanConfig(repoId);
+  const { state, moveCard, unassignCard, refreshState } = useKanbanState(repoId);
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [showNewColumnEditor, setShowNewColumnEditor] = useState(false);
 
-  useKanbanTick(repoName, sessions, state.placements, refreshState);
+  useKanbanTick(repoId, sessions, state.placements, refreshState);
 
   const handleMoveCard = useCallback(
     (sessionId: string, toColumnId: string) => {

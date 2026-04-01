@@ -6,7 +6,7 @@ import { promisify } from "util";
 import { loadConfig } from "@/lib/config";
 import { invalidateSessionCache } from "@/lib/discovery";
 import { getAllKanbanConfigs, loadKanbanState, saveKanbanState } from "@/lib/kanban-store";
-import { repoNameFromPath } from "@/lib/paths";
+import { resolveRepoId } from "@/lib/repo-registry";
 import { createSession } from "@/lib/terminal";
 
 const execFileAsync = promisify(execFile);
@@ -132,16 +132,16 @@ export async function POST(request: Request) {
     // Store it as a pending prompt for columns to use via {{initialPrompt}}.
     let effectivePrompt = prompt;
     // Use repoPath (not targetPath) — worktrees have different names like "api-fix-bug"
-    const kanbanRepoName = repoNameFromPath(repoPath);
-    if (kanbanRepoName && effectivePrompt) {
+    const repoId = await resolveRepoId(repoPath);
+    if (effectivePrompt) {
       const allConfigs = await getAllKanbanConfigs();
-      const kanbanConfig = allConfigs.get(kanbanRepoName);
+      const kanbanConfig = allConfigs.get(repoId);
       if (kanbanConfig && kanbanConfig.columns.length > 0) {
-        console.log(`[create-session] Kanban enabled for "${kanbanRepoName}" — storing prompt, session will start idle`);
-        const kanbanState = await loadKanbanState(kanbanRepoName);
+        console.log(`[create-session] Kanban enabled for repo ${repoId} — storing prompt, session will start idle`);
+        const kanbanState = await loadKanbanState(repoId);
         if (!kanbanState.pendingPrompts) kanbanState.pendingPrompts = {};
         kanbanState.pendingPrompts[targetPath] = effectivePrompt;
-        await saveKanbanState(kanbanRepoName, kanbanState);
+        await saveKanbanState(repoId, kanbanState);
         effectivePrompt = undefined;
       }
     }

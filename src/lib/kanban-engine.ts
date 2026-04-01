@@ -4,7 +4,7 @@ import { join } from "path";
 import { promisify } from "util";
 import { CASCADE_SETTLE_MS, PROCESS_TIMEOUT_MS } from "./constants";
 import { getGitDiff } from "./git-info";
-import { sendPromptToSession } from "./kanban-executor";
+import { clearMessageBar, sendPromptToSession } from "./kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "./kanban-store";
 import type { ClaudeSession, KanbanColumn, KanbanState } from "./types";
 
@@ -155,15 +155,15 @@ export interface KanbanAction {
 const tickLocks = new Map<string, boolean>();
 
 export async function processIdleTransitions(
-  repoName: string,
+  repoId: string,
   sessions: ClaudeSession[],
 ): Promise<KanbanAction[]> {
-  if (tickLocks.get(repoName)) return [];
-  tickLocks.set(repoName, true);
+  if (tickLocks.get(repoId)) return [];
+  tickLocks.set(repoId, true);
 
   try {
-    const config = await loadKanbanConfig(repoName);
-    const state = await loadKanbanState(repoName);
+    const config = await loadKanbanConfig(repoId);
+    const state = await loadKanbanState(repoId);
     const actions: KanbanAction[] = [];
     let stateChanged = false;
 
@@ -277,16 +277,16 @@ export async function processIdleTransitions(
     }
 
     if (stateChanged) {
-      await saveKanbanState(repoName, state);
+      await saveKanbanState(repoId, state);
     }
 
-    // Execute actions: send prompts to sessions
+    // Execute actions: clear message bar then send prompts to sessions
     for (const action of actions) {
       const session = sessions.find((s) => s.id === action.sessionId);
       if (session) {
         try {
-          const send = sendPromptToSession;
-          await send(session, action.prompt);
+          await clearMessageBar(session);
+          await sendPromptToSession(session, action.prompt);
         } catch (err) {
           console.error(`Kanban: failed to send prompt to session ${action.sessionId}:`, err);
         }
@@ -295,7 +295,7 @@ export async function processIdleTransitions(
 
     return actions;
   } finally {
-    tickLocks.delete(repoName);
+    tickLocks.delete(repoId);
   }
 }
 

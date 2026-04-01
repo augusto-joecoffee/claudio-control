@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(_request: Request, { params }: { params: Promise<{ repoName: string }> }) {
   try {
-    const { repoName } = await params;
-    const decoded = decodeURIComponent(repoName);
+    const { repoName: repoId } = await params;
+    const decoded = decodeURIComponent(repoId);
 
     const sessions = await discoverSessions();
     const actions = await processIdleTransitions(decoded, sessions);

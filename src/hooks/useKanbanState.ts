@@ -6,9 +6,9 @@ import useSWR from "swr";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-export function useKanbanState(repoName: string | null) {
+export function useKanbanState(repoId: string | null) {
   const { data, mutate } = useSWR<KanbanState>(
-    repoName ? `/api/kanban/${encodeURIComponent(repoName)}/state` : null,
+    repoId ? `/api/kanban/${encodeURIComponent(repoId)}/state` : null,
     fetcher,
     { revalidateOnFocus: false, refreshInterval: 5000 },
   );
@@ -35,7 +35,7 @@ export function useKanbanState(repoName: string | null) {
 
   const moveCard = useCallback(
     async (sessionId: string, toColumnId: string): Promise<{ queued: boolean }> => {
-      if (!repoName) return { queued: false };
+      if (!repoId) return { queued: false };
 
       // Remember original columnId for potential revert (output prompt keeps card in place)
       const originalColumnId = state.placements.find((p) => p.sessionId === sessionId)?.columnId;
@@ -57,7 +57,7 @@ export function useKanbanState(repoName: string | null) {
 
       // Call server
       try {
-        const res = await fetch(`/api/kanban/${encodeURIComponent(repoName)}/move`, {
+        const res = await fetch(`/api/kanban/${encodeURIComponent(repoId)}/move`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId, toColumnId }),
@@ -85,12 +85,12 @@ export function useKanbanState(repoName: string | null) {
         return { queued: false };
       }
     },
-    [repoName, state.placements, mutate],
+    [repoId, state.placements, mutate],
   );
 
   const assignCard = useCallback(
     (sessionId: string, columnId: string) => {
-      if (!repoName) return;
+      if (!repoId) return;
       setLocalState((prev) => {
         const s = prev ?? { placements: [], outputHistory: {} };
         const existing = s.placements.find((p) => p.sessionId === sessionId);
@@ -104,7 +104,7 @@ export function useKanbanState(repoName: string | null) {
         }
         const next = { ...s, placements };
         // Save to server
-        fetch(`/api/kanban/${encodeURIComponent(repoName)}/state`, {
+        fetch(`/api/kanban/${encodeURIComponent(repoId)}/state`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(next),
@@ -112,18 +112,18 @@ export function useKanbanState(repoName: string | null) {
         return next;
       });
     },
-    [repoName],
+    [repoId],
   );
 
   const unassignCard = useCallback(
     (sessionId: string) => {
-      if (!repoName) return;
+      if (!repoId) return;
       setLocalState((prev) => {
         const s = prev ?? { placements: [], outputHistory: {} };
         const placements = s.placements.filter((p) => p.sessionId !== sessionId);
         const next = { ...s, placements };
         mutate(next, false);
-        fetch(`/api/kanban/${encodeURIComponent(repoName)}/state`, {
+        fetch(`/api/kanban/${encodeURIComponent(repoId)}/state`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(next),
@@ -131,7 +131,7 @@ export function useKanbanState(repoName: string | null) {
         return next;
       });
     },
-    [repoName, mutate],
+    [repoId, mutate],
   );
 
   const refreshState = useCallback(() => mutate(), [mutate]);
