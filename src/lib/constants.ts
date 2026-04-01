@@ -19,3 +19,5 @@ export const PROCESS_TIMEOUT_MS = 5000;
 export const APPLESCRIPT_FOCUS_DELAY_S = 0.2;
 export const APPROVAL_SETTLE_MS = 3000;
 export const ORPHAN_CHECK_INTERVAL_MS = 30_000;
+/** How long a session must be idle (no JSONL activity) before auto-cascade triggers. */
+export const CASCADE_SETTLE_MS = 30_000;

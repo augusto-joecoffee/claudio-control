@@ -2,7 +2,7 @@ import { execFile } from "child_process";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { promisify } from "util";
-import { PROCESS_TIMEOUT_MS } from "./constants";
+import { CASCADE_SETTLE_MS, PROCESS_TIMEOUT_MS } from "./constants";
 import { getGitDiff } from "./git-info";
 import { sendPromptToSession } from "./kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "./kanban-store";
@@ -235,8 +235,11 @@ export async function processIdleTransitions(
         continue;
       }
 
-      // CASE B: Auto-cascade
-      if (currentColumn.autoCascade) {
+      // CASE B: Auto-cascade — only when truly done:
+      // 1. Not "waiting" (mid-task question)
+      // 2. No JSONL activity for CASCADE_SETTLE_MS (avoids brief idle flashes between tool calls)
+      const idleAge = session.lastActivity ? Date.now() - new Date(session.lastActivity).getTime() : Infinity;
+      if (currentColumn.autoCascade && session.status !== "waiting" && idleAge >= CASCADE_SETTLE_MS) {
         const currentIndex = config.columns.findIndex((c) => c.id === currentColumn.id);
         const nextColumn = config.columns[currentIndex + 1];
         if (!nextColumn) continue;
