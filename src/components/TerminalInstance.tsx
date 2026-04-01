@@ -58,6 +58,7 @@ export function TerminalInstance({
     // Hoist variables that cleanup needs access to
     let cleanupData: (() => void) | null = null;
     let cleanupExit: (() => void) | null = null;
+    let cleanupWheel: (() => void) | null = null;
     let observer: ResizeObserver | null = null;
     let safetyFit: ReturnType<typeof setTimeout> | null = null;
 
@@ -77,6 +78,7 @@ export function TerminalInstance({
         cursorBlink: true,
         fontSize: 13,
         fontFamily,
+        scrollback: 10000,
         theme: {
           background: "#0a0a0f",
           foreground: "#e4e4e7",
@@ -107,6 +109,19 @@ export function TerminalInstance({
       term.loadAddon(fitAddon);
       term.open(container);
 
+      // Mouse wheel scrolling for xterm.js normal buffer scrollback.
+      // Alternate buffer sequences are stripped (see onPtyData below) so
+      // Claude Code's TUI output accumulates in the normal buffer with
+      // full scrollback support.
+      const wheelHandler = (e: WheelEvent) => {
+        if (e.shiftKey) return; // Shift+wheel: pass through for tmux/vim
+        e.preventDefault();
+        const lines = Math.max(1, Math.ceil(Math.abs(e.deltaY) / 40));
+        term.scrollLines(e.deltaY < 0 ? -lines : lines);
+      };
+      container.addEventListener("wheel", wheelHandler, { capture: true, passive: false });
+      cleanupWheel = () => container.removeEventListener("wheel", wheelHandler, { capture: true });
+
       // Double-RAF ensures the container has its final layout dimensions before fitting
       requestAnimationFrame(() => requestAnimationFrame(() => {
         if (cancelled) return;
@@ -122,7 +137,12 @@ export function TerminalInstance({
         ptyIdRef.current = id;
 
         cleanupData = api!.onPtyData((evId, data) => {
-          if (evId === id) term.write(data);
+          if (evId === id) {
+            // Strip alternate buffer sequences so xterm.js stays in normal buffer
+            // with full scrollback.
+            const filtered = data.replace(/\x1b\[\?(?:47|1047|1049)[hl]/g, "");
+            term.write(filtered);
+          }
         });
 
         cleanupExit = api!.onPtyExit((evId) => {
@@ -221,6 +241,7 @@ export function TerminalInstance({
       cancelled = true;
       if (safetyFit) clearTimeout(safetyFit);
       observer?.disconnect();
+      cleanupWheel?.();
       cleanupData?.();
       cleanupExit?.();
       termRef.current?.dispose();

@@ -26,6 +26,8 @@ export interface ClaudeSession {
   taskSummary: TaskSummary | null;
   initialPrompt: string | null;
   hasPendingToolUse: boolean;
+  /** stop_reason from the last assistant message: "end_turn", "tool_use", or "max_tokens". */
+  lastStopReason: string | null;
   jsonlPath: string | null;
   prUrl: string | null;
   orphaned: boolean;
@@ -138,6 +140,10 @@ export interface KanbanColumn {
   outputPrompt?: string;
   /** When true, cards auto-move to the next column when their session becomes idle. */
   autoCascade: boolean;
+  /** Override the default settle time (ms) before auto-cascade triggers. Default: 30000. */
+  settleMs?: number;
+  /** When true, auto-cascade only proceeds if the extracted output is non-empty. */
+  requireOutput?: boolean;
 }
 
 export interface KanbanConfig {
@@ -157,8 +163,10 @@ export interface KanbanCardPlacement {
   lastOutput?: string;
   /** The session's initial prompt, captured when it first enters the kanban. Persisted here because /clear wipes the JSONL source. */
   initialPrompt?: string;
-  /** True when an output prompt has been sent and we're waiting for the session to finish before moving. */
-  pendingOutputPrompt?: boolean;
+  /** Timestamp (ms) when an output prompt was sent. We wait for the session to finish before moving. */
+  pendingOutputPrompt?: number;
+  /** Timestamp (ms) when the last prompt was sent to this session via kanban. Cleared on next working transition. */
+  promptSentAt?: number;
 }
 
 export interface KanbanState {

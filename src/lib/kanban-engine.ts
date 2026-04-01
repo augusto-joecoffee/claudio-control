@@ -2,7 +2,7 @@ import { execFile } from "child_process";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { promisify } from "util";
-import { CASCADE_SETTLE_MS, PROCESS_TIMEOUT_MS } from "./constants";
+import { CASCADE_SETTLE_MS, OUTPUT_PROMPT_TIMEOUT_MS, PROCESS_TIMEOUT_MS, PROMPT_CONFIRM_TIMEOUT_MS } from "./constants";
 import { getGitDiff } from "./git-info";
 import { clearMessageBar, sendPromptToSession } from "./kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "./kanban-store";
@@ -166,13 +166,26 @@ export async function processIdleTransitions(
     const state = await loadKanbanState(repoId);
     const actions: KanbanAction[] = [];
     let stateChanged = false;
+    const now = Date.now();
 
     for (const placement of state.placements) {
       const session = sessions.find((s) => s.id === placement.sessionId);
-      if (!session || (session.status !== "idle" && session.status !== "finished" && session.status !== "waiting")) continue;
+      if (!session || (session.status !== "idle" && session.status !== "finished" && session.status !== "waiting" && session.status !== "errored")) continue;
 
       const currentColumn = config.columns.find((c) => c.id === placement.columnId);
       if (!currentColumn) continue;
+
+      // ── Guard: prompt was recently sent, wait for confirmation ──
+      // After sending a prompt, Claude needs time to receive and start processing it.
+      // Skip this session until either the timeout elapses or session goes "working".
+      if (placement.promptSentAt && now - placement.promptSentAt < PROMPT_CONFIRM_TIMEOUT_MS) {
+        continue;
+      }
+      // Clear stale promptSentAt once the timeout has passed
+      if (placement.promptSentAt) {
+        placement.promptSentAt = undefined;
+        stateChanged = true;
+      }
 
       // CASE A: Queued move
       if (placement.queuedColumnId) {
@@ -181,6 +194,12 @@ export async function processIdleTransitions(
 
         // A1: Output prompt was sent and just finished — now do the actual move
         if (placement.pendingOutputPrompt) {
+          // Timeout guard: if the output prompt has been pending too long, force-complete
+          const pendingSince = placement.pendingOutputPrompt;
+          if (session.status === "waiting" && now - pendingSince < OUTPUT_PROMPT_TIMEOUT_MS) {
+            continue; // Still processing or waiting within timeout
+          }
+
           const output = await extractColumnOutput(currentColumn, session);
           storeOutput(state, placement.sessionId, currentColumn.id, output);
 
@@ -206,7 +225,7 @@ export async function processIdleTransitions(
           const outputPromptText = currentColumn.outputPrompt
             .replace(/\{\{initialPrompt\}\}/g, placement.initialPrompt ?? session.initialPrompt ?? "");
 
-          placement.pendingOutputPrompt = true;
+          placement.pendingOutputPrompt = now;
           stateChanged = true;
 
           if (outputPromptText) {
@@ -235,11 +254,20 @@ export async function processIdleTransitions(
         continue;
       }
 
-      // CASE B: Auto-cascade — only when truly done:
-      // 1. Not "waiting" (mid-task question)
-      // 2. No JSONL activity for CASCADE_SETTLE_MS (avoids brief idle flashes between tool calls)
-      const idleAge = session.lastActivity ? Date.now() - new Date(session.lastActivity).getTime() : Infinity;
-      if (currentColumn.autoCascade && session.status !== "waiting" && idleAge >= CASCADE_SETTLE_MS) {
+      // CASE B: Auto-cascade — only when truly done.
+      // Guards (all must pass):
+      // 1. Not "waiting" (mid-task question or permission prompt)
+      // 2. Not cut off mid-response (stop_reason: "max_tokens")
+      // 3. No JSONL activity for settle period (avoids brief idle flashes between tool calls)
+      const idleAge = session.lastActivity ? now - new Date(session.lastActivity).getTime() : Infinity;
+      const settleMs = currentColumn.settleMs ?? CASCADE_SETTLE_MS;
+      const cascadeReady =
+        currentColumn.autoCascade &&
+        session.status !== "waiting" &&
+        session.lastStopReason !== "max_tokens" &&
+        idleAge >= settleMs;
+
+      if (cascadeReady) {
         const currentIndex = config.columns.findIndex((c) => c.id === currentColumn.id);
         const nextColumn = config.columns[currentIndex + 1];
         if (!nextColumn) continue;
@@ -250,7 +278,7 @@ export async function processIdleTransitions(
             .replace(/\{\{initialPrompt\}\}/g, placement.initialPrompt ?? session.initialPrompt ?? "");
 
           placement.queuedColumnId = nextColumn.id;
-          placement.pendingOutputPrompt = true;
+          placement.pendingOutputPrompt = now;
           stateChanged = true;
 
           if (outputPromptText) {
@@ -259,8 +287,14 @@ export async function processIdleTransitions(
           continue;
         }
 
-        // B2: No output prompt — existing cascade behavior
+        // B2: No output prompt — extract output and cascade
         const output = await extractColumnOutput(currentColumn, session);
+
+        // requireOutput guard: don't cascade if column expects output but got none
+        if (currentColumn.requireOutput && !output.trim()) {
+          continue;
+        }
+
         storeOutput(state, placement.sessionId, currentColumn.id, output);
 
         const previousOutput = getLastOutput(state, placement.sessionId, currentColumn.id);
@@ -280,17 +314,27 @@ export async function processIdleTransitions(
       await saveKanbanState(repoId, state);
     }
 
-    // Execute actions: clear message bar then send prompts to sessions
+    // Execute actions: clear message bar, send prompts to sessions, and record promptSentAt
     for (const action of actions) {
       const session = sessions.find((s) => s.id === action.sessionId);
       if (session) {
         try {
           await clearMessageBar(session);
           await sendPromptToSession(session, action.prompt);
+          // Track when we sent this prompt to guard against race-window double-cascade
+          const placement = state.placements.find((p) => p.sessionId === action.sessionId);
+          if (placement) {
+            placement.promptSentAt = Date.now();
+          }
         } catch (err) {
           console.error(`Kanban: failed to send prompt to session ${action.sessionId}:`, err);
         }
       }
+    }
+
+    // Persist promptSentAt updates
+    if (actions.length > 0) {
+      await saveKanbanState(repoId, state);
     }
 
     return actions;

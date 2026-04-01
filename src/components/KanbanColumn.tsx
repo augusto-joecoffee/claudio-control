@@ -65,7 +65,7 @@ export function KanbanColumn({ column, sessions, placements, renderCard, onEditC
           {sessions.map((session) => {
             const placement = placements.find((p) => p.sessionId === session.id);
             const isQueued = placement?.queuedColumnId != null;
-            const isPendingOutput = placement?.pendingOutputPrompt === true;
+            const isPendingOutput = placement?.pendingOutputPrompt != null;
             return (
               <div key={session.id} className="relative">
                 {isQueued && (

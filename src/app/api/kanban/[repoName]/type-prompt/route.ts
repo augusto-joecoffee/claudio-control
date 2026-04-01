@@ -21,8 +21,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
       return NextResponse.json({ ok: true, typed: false, reason: "no pending prompt" });
     }
 
-    // Find the session by working directory
+    // Don't type if the session already has a column placement — the column workflow handles it
     const sessions = await discoverSessions();
+    const matchSession = sessions.find((s) => s.workingDirectory === workingDirectory);
+    if (matchSession && state.placements.some((p) => p.sessionId === matchSession.id)) {
+      return NextResponse.json({ ok: true, typed: false, reason: "session already in column" });
+    }
+
+    // Find the session by working directory
     const session = sessions.find((s) => s.workingDirectory === workingDirectory);
     if (!session) {
       return NextResponse.json({ ok: true, typed: false, reason: "session not found yet" });

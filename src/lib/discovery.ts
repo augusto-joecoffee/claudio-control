@@ -9,6 +9,7 @@ import { loadSessionMeta } from "./session-meta";
 import {
   extractBranch,
   extractInitialPrompt,
+  extractLastStopReason,
   extractPreview,
   extractSessionId,
   extractStartedAt,
@@ -93,6 +94,7 @@ async function buildSession(
   let lastActivity = new Date().toISOString();
   let taskSummary: ClaudeSession["taskSummary"] = null;
   let initialPrompt: string | null = null;
+  let lastStopReason: string | null = null;
 
   const [jsonlResult, git, mainWorktreePath] = await Promise.all([
     jsonlPath
@@ -114,6 +116,7 @@ async function buildSession(
     pendingToolUse = hasPendingToolUse(lines);
     taskSummary = extractTaskSummary(headLines);
     initialPrompt = extractInitialPrompt(headLines);
+    lastStopReason = extractLastStopReason(lines);
     if (mtime) lastActivity = mtime.toISOString();
   }
 
@@ -130,7 +133,7 @@ async function buildSession(
   // If the hook status is available (and not null, meaning PermissionRequest was ignored),
   // use it; otherwise fall back to the heuristic classifier.
   const hookDerivedStatus = hookStatus?.status ?? null;
-  const status: ClaudeSession["status"] =
+  let status: ClaudeSession["status"] =
     hookDerivedStatus ??
     classifyStatus({
       pid: info.pid,
@@ -140,6 +143,14 @@ async function buildSession(
       isAskingForInput: askingForInput,
       hasPendingToolUse: pendingToolUse,
     });
+
+  // Hook "Stop" → "idle", but the JSONL may reveal a more specific state.
+  // The heuristic detects "waiting" (asking for input) and "errored" conditions
+  // that the hook can't distinguish from a normal stop.
+  if (status === "idle") {
+    if (askingForInput) status = "waiting";
+    else if (hasError) status = "errored";
+  }
 
   return {
     id: sessionId,
@@ -155,6 +166,7 @@ async function buildSession(
     git,
     preview,
     hasPendingToolUse: pendingToolUse,
+    lastStopReason,
     taskSummary,
     initialPrompt,
     jsonlPath,

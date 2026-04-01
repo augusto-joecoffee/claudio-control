@@ -70,7 +70,7 @@ export function useKanbanState(repoId: string | null) {
             if (!prev) return prev;
             const placements = prev.placements.map((p) =>
               p.sessionId === sessionId
-                ? { ...p, columnId: originalColumnId ?? p.columnId, queuedColumnId: toColumnId, pendingOutputPrompt: true }
+                ? { ...p, columnId: originalColumnId ?? p.columnId, queuedColumnId: toColumnId, pendingOutputPrompt: Date.now() }
                 : p,
             );
             return { ...prev, placements };
