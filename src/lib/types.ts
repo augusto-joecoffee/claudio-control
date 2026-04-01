@@ -145,6 +145,8 @@ export interface KanbanConfig {
 
 export interface KanbanCardPlacement {
   sessionId: string;
+  /** Stable process ID for re-matching after session ID changes. */
+  pid?: number;
   columnId: string;
   /** Target column when moved while session is working. Executed when session goes idle. */
   queuedColumnId?: string;
@@ -162,4 +164,6 @@ export interface KanbanState {
   placements: KanbanCardPlacement[];
   /** Accumulated outputs per session per column, for passing between pipeline stages. */
   outputHistory: Record<string, Record<string, string>>;
+  /** Prompts stored at session creation for kanban-enabled repos (keyed by working directory). */
+  pendingPrompts?: Record<string, string>;
 }

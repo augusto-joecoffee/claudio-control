@@ -45,6 +45,21 @@ export async function sendText(info: TerminalInfo, text: string): Promise<void> 
   await adapter.sendText(info, text);
 }
 
+/** Type text into the terminal WITHOUT pressing Enter — text appears in input bar. */
+export async function typeText(info: TerminalInfo, text: string): Promise<void> {
+  if (info.inTmux && info.tmux) {
+    // send-keys with -l for literal text, no Enter
+    await execFileAsync(getTmuxPathSync(), ["send-keys", "-t", info.tmux.paneId, "-l", text], {
+      timeout: PROCESS_TIMEOUT_MS,
+    });
+    return;
+  }
+  // For non-tmux, fall back to sendText (which presses Enter — no way to avoid it generically)
+  const adapter = getAdapter(info.app);
+  if (!adapter) return;
+  await adapter.sendText(info, text);
+}
+
 export async function sendKeystroke(info: TerminalInfo, keystroke: string): Promise<void> {
   // tmux: send directly to the pane
   if (info.inTmux && info.tmux) {

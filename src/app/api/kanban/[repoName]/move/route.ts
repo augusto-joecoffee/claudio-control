@@ -1,6 +1,6 @@
 import { discoverSessions } from "@/lib/discovery";
 import { buildFullColumnPrompt, extractColumnOutput } from "@/lib/kanban-engine";
-import { sendClearAndPrompt, sendPromptToSession } from "@/lib/kanban-executor";
+import { sendPromptToSession } from "@/lib/kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "@/lib/kanban-store";
 import { NextResponse } from "next/server";
 
@@ -39,8 +39,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
     let placement = state.placements.find((p) => p.sessionId === sessionId);
     const fromUnstaged = !placement;
     if (!placement) {
-      placement = { sessionId, columnId: toColumnId, initialPrompt: session.initialPrompt ?? undefined };
+      // Use pending prompt (stored at session creation for kanban repos) or fall back to JSONL-extracted prompt
+      const pendingPrompt = state.pendingPrompts?.[session.workingDirectory];
+      placement = { sessionId, pid: session.pid ?? undefined, columnId: toColumnId, initialPrompt: pendingPrompt ?? session.initialPrompt ?? undefined };
       state.placements.push(placement);
+      if (pendingPrompt && state.pendingPrompts) {
+        delete state.pendingPrompts[session.workingDirectory];
+      }
     }
 
     const currentColumn = config.columns.find((c) => c.id === placement!.columnId);
@@ -82,18 +87,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
       placement.columnId = toColumnId;
       placement.queuedColumnId = undefined;
 
-      // Build prompt BEFORE /clear so initialPrompt is still available
       const prompt = await buildFullColumnPrompt(targetColumn, previousOutput, session.workingDirectory, placement.initialPrompt ?? session.initialPrompt ?? undefined);
       await saveKanbanState(decoded, state);
 
+      // Fire prompt in background — don't block the response
       if (prompt) {
-        try {
-          const send = fromUnstaged ? sendClearAndPrompt : sendPromptToSession;
-          await send(session, prompt);
-        } catch (err) {
-          console.error("Failed to send prompt to session:", err);
-          return NextResponse.json({ ok: true, queued: false, promptSent: false, error: String(err) });
-        }
+        sendPromptToSession(session, prompt).catch((err) => console.error("Failed to send prompt:", err));
       }
 
       return NextResponse.json({ ok: true, queued: false, promptSent: !!prompt });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import useSWR from "swr";
 import { refreshAfterAction } from "@/lib/actions";
 
 interface RepoInfo {
@@ -35,6 +36,12 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>(repoPath || "");
   const [selectedRepoName, setSelectedRepoName] = useState<string>(repoName || "");
+  // Check if the selected repo (or its parent for worktrees) has kanban enabled
+  const { data: kanbanRepos } = useSWR<string[]>("/api/kanban/repos", (url: string) => fetch(url).then((r) => r.json()));
+  const selectedDirName = (selectedRepo || repoPath || "").split("/").filter(Boolean).pop() || "";
+  // Match exact name or worktree prefix (e.g., "api-branch" starts with "api")
+  const kanbanRepoName = kanbanRepos?.find((r) => selectedDirName === r || selectedDirName.startsWith(r + "-")) ?? null;
+  const kanbanEnabled = kanbanRepoName !== null;
   const [repoFilter, setRepoFilter] = useState("");
   const [pickerOpen, setPickerOpen] = useState(!repoPath);
   const [needsSetup, setNeedsSetup] = useState(false);
@@ -259,6 +266,11 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
     setError(null);
 
     try {
+      const trimmedPrompt = (prompt ?? "").trim() || undefined;
+      // When kanban is enabled, don't auto-submit the prompt — store it for columns to use
+      console.log("[NewSessionModal] kanbanEnabled:", kanbanEnabled, "kanbanRepoName:", kanbanRepoName, "selectedDirName:", selectedDirName);
+      const sendPrompt = kanbanEnabled ? undefined : trimmedPrompt;
+
       const res = await fetch("/api/sessions/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -266,7 +278,7 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
           repoPath: targetRepo,
           branchName: branchName.trim() || undefined,
           baseBranch: branchName.trim() ? baseBranch.trim() || undefined : undefined,
-          prompt: (prompt ?? "").trim() || undefined,
+          prompt: sendPrompt,
           tmuxSession: selectedTmuxSession || undefined,
         }),
       });
@@ -276,6 +288,40 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
         setError(data.error || "Failed to create session");
         setLoading(false);
         return;
+      }
+
+      // Store the prompt in kanban pendingPrompts for column {{initialPrompt}} interpolation
+      if (kanbanEnabled && trimmedPrompt && kanbanRepoName) {
+        const targetPath = data.path || targetRepo;
+        fetch(`/api/kanban/${encodeURIComponent(kanbanRepoName)}/state`)
+          .then((r) => r.json())
+          .then((state) => {
+            const pendingPrompts = state.pendingPrompts || {};
+            pendingPrompts[targetPath] = trimmedPrompt;
+            return fetch(`/api/kanban/${encodeURIComponent(kanbanRepoName!)}/state`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...state, pendingPrompts }),
+            });
+          })
+          .then(() => {
+            // Wait for session to start, then type the prompt into its message bar
+            const tryType = (attempts: number) => {
+              if (attempts <= 0) return;
+              setTimeout(() => {
+                fetch(`/api/kanban/${encodeURIComponent(kanbanRepoName!)}/type-prompt`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ workingDirectory: targetPath }),
+                })
+                  .then((r) => r.json())
+                  .then((res) => { if (!res.typed) tryType(attempts - 1); })
+                  .catch(() => tryType(attempts - 1));
+              }, 2000);
+            };
+            tryType(5);
+          })
+          .catch((err) => console.error("Failed to store kanban pending prompt:", err));
       }
 
       onClose();

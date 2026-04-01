@@ -4,7 +4,7 @@ import { join } from "path";
 import { promisify } from "util";
 import { PROCESS_TIMEOUT_MS } from "./constants";
 import { getGitDiff } from "./git-info";
-import { sendClearAndPrompt, sendPromptToSession } from "./kanban-executor";
+import { sendPromptToSession } from "./kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "./kanban-store";
 import type { ClaudeSession, KanbanColumn, KanbanState } from "./types";
 
@@ -282,7 +282,7 @@ export async function processIdleTransitions(
       const session = sessions.find((s) => s.id === action.sessionId);
       if (session) {
         try {
-          const send = action.clearFirst ? sendClearAndPrompt : sendPromptToSession;
+          const send = sendPromptToSession;
           await send(session, action.prompt);
         } catch (err) {
           console.error(`Kanban: failed to send prompt to session ${action.sessionId}:`, err);
