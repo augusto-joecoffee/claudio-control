@@ -13,7 +13,7 @@ export function SortableSection({ id, header, children }: { id: string; header: 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.3 : 1,
   };
 
   return (

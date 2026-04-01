@@ -8,6 +8,7 @@ import {
   closestCenter,
   useSensor,
   useSensors,
+  defaultDropAnimationSideEffects,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -180,6 +181,14 @@ export function SessionGrid({
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  const dropAnimationConfig = {
+    duration: 250,
+    easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+    sideEffects: defaultDropAnimationSideEffects({
+      styles: { active: { opacity: '0' } },
+    }),
+  };
 
   const rawGroups = groupSessions(sessions);
   const groups = applyLayout(rawGroups, layout ?? null);
@@ -448,9 +457,9 @@ export function SessionGrid({
           </div>
         </SortableContext>
 
-        <DragOverlay dropAnimation={null}>
+        <DragOverlay dropAnimation={dropAnimationConfig}>
           {activeDragId && activeDragType === "section" && (
-            <div className="bg-zinc-900/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-zinc-700 shadow-xl">
+            <div className="drag-overlay-lift bg-zinc-900/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-zinc-700 shadow-xl">
               <span className="text-sm text-zinc-300">
                 {prettifyName(displayGroups.find((g) => g.repoPath === activeDragId)?.repoName ?? "")}
               </span>
@@ -460,7 +469,7 @@ export function SessionGrid({
             const session = sessions.find((s) => s.id === activeDragId);
             if (!session) return null;
             return (
-              <div className="pointer-events-none opacity-90 shadow-2xl shadow-black/50 rounded-xl ring-1 ring-white/10" style={{ width: viewMode === "list" ? "100%" : 380 }}>
+              <div className="drag-overlay-lift pointer-events-none opacity-90 shadow-2xl shadow-black/50 rounded-xl ring-1 ring-white/10" style={{ width: viewMode === "list" ? "100%" : 380 }}>
                 {viewMode === "list" ? renderRow(session) : renderCard(session)}
               </div>
             );
@@ -514,9 +523,9 @@ export function SessionGrid({
         </div>
       </SortableContext>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={dropAnimationConfig}>
         {activeDragId && activeDragType === "section" && (
-          <div className="bg-zinc-900/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-zinc-700 shadow-xl">
+          <div className="drag-overlay-lift bg-zinc-900/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-zinc-700 shadow-xl">
             <span className="text-sm text-zinc-300">
               {prettifyName(displayGroups.find((g) => g.repoPath === activeDragId)?.repoName ?? "")}
             </span>
@@ -526,7 +535,7 @@ export function SessionGrid({
           const session = sessions.find((s) => s.id === activeDragId);
           if (!session) return null;
           return (
-            <div className="pointer-events-none opacity-90 shadow-2xl shadow-black/50 rounded-xl ring-1 ring-white/10" style={{ width: viewMode === "list" ? "100%" : 380 }}>
+            <div className="drag-overlay-lift pointer-events-none opacity-90 shadow-2xl shadow-black/50 rounded-xl ring-1 ring-white/10" style={{ width: viewMode === "list" ? "100%" : 380 }}>
               {viewMode === "list" ? renderRow(session) : renderCard(session)}
             </div>
           );

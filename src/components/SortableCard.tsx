@@ -13,11 +13,10 @@ export function SortableCard({ id, children }: { id: string; children: ReactNode
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="group/sortable relative">
+    <div ref={setNodeRef} style={style} className={`group/sortable relative ${isDragging ? 'drag-placeholder' : ''}`}>
       <div
         ref={setActivatorNodeRef}
         {...attributes}

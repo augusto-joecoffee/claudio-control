@@ -70,6 +70,34 @@ body {
   transform: translateY(-2px);
 }
 
+/* Drag & drop animations */
+@keyframes drag-overlay-lift {
+  from {
+    transform: scale(1) rotate(0deg);
+  }
+  to {
+    transform: scale(1.03) rotate(1deg);
+  }
+}
+.drag-overlay-lift {
+  animation: drag-overlay-lift 0.15s cubic-bezier(0.18, 0.67, 0.6, 1.22) forwards;
+}
+
+.drag-placeholder {
+  position: relative;
+}
+.drag-placeholder > * {
+  visibility: hidden;
+}
+.drag-placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px dashed rgba(113, 113, 122, 0.3);
+  border-radius: 12px;
+  background: rgba(39, 39, 42, 0.15);
+}
+
 /* Smooth scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
