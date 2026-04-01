@@ -163,7 +163,7 @@ export function SessionCard({
     <div className="relative">
       <div
         onClick={onSelect}
-        className={`group relative flex flex-col rounded-xl border bg-[#0a0a0f]/80 backdrop-blur-xs p-5 card-hover cursor-pointer ${selected ? "ring-2 ring-blue-400 border-blue-400/50 shadow-[0_0_30px_rgba(96,165,250,0.25),0_0_60px_rgba(96,165,250,0.10)] scale-[1.02]" : styles.border} ${!selected ? styles.glow : ""} ${pulse ? "attention-pulse" : ""} ${cleanupState === "cleaning" ? "opacity-50 pointer-events-none" : ""}`}
+        className={`group relative flex flex-col rounded-xl border bg-[#0a0a0f]/80 backdrop-blur-xs p-5 card-hover cursor-pointer h-[415px] overflow-hidden ${selected ? "ring-2 ring-blue-400 border-blue-400/50 shadow-[0_0_30px_rgba(96,165,250,0.25),0_0_60px_rgba(96,165,250,0.10)] scale-[1.02]" : styles.border} ${!selected ? styles.glow : ""} ${pulse ? "attention-pulse" : ""} ${cleanupState === "cleaning" ? "opacity-50 pointer-events-none" : ""}`}
       >
         {/* Gradient accent at top */}
         <div
