@@ -414,6 +414,17 @@ ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command, wr
   return { ptyId: id };
 });
 
+// Copy a file from a temp/ephemeral location to a stable path.
+// Used for macOS screenshot preview drops where the source is deleted immediately.
+ipcMain.handle("file:copyTemp", async (_event, srcPath) => {
+  const dropDir = path.join(app.getPath("temp"), "claudio-drops");
+  await fs.promises.mkdir(dropDir, { recursive: true });
+  const ext = path.extname(srcPath);
+  const dest = path.join(dropDir, `${crypto.randomUUID()}${ext}`);
+  await fs.promises.copyFile(srcPath, dest);
+  return dest;
+});
+
 ipcMain.on("pty:write", (_event, { ptyId, data }) => {
   const proc = ptyProcesses.get(ptyId);
   if (proc) proc.write(data);

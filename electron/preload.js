@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("pty:exit", listener);
   },
   getFilePath: (file) => webUtils.getPathForFile(file),
+  copyTempFile: (srcPath) => ipcRenderer.invoke("file:copyTemp", srcPath),
   ptyListInlineTmux: () => ipcRenderer.invoke("pty:listInlineTmux"),
 
   // Code Review

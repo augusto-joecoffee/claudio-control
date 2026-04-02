@@ -312,15 +312,24 @@ export function TerminalInstance({
     const files = Array.from(dt.files);
     if (files.length === 0) return;
 
-    const paths = files
-      .map((f) => api.getFilePath(f))
-      .filter(Boolean);
-    if (paths.length > 0) {
+    const rawPaths = files.map((f) => api.getFilePath(f)).filter(Boolean);
+    if (rawPaths.length === 0) return;
+
+    // Copy ephemeral files (e.g. macOS screenshot previews from TemporaryItems)
+    // to a stable location before sending, since the originals get deleted immediately.
+    const copyTempFile = (api as unknown as { copyTempFile?: (p: string) => Promise<string> }).copyTempFile;
+    const sendPaths = async () => {
+      const paths = await Promise.all(
+        rawPaths.map((p) =>
+          copyTempFile && p.includes("/TemporaryItems/") ? copyTempFile(p) : p,
+        ),
+      );
       const escaped = paths.map((p) => (p.includes(" ") ? `"${p}"` : p));
       const text = escaped.join(" ");
       api.ptyWrite(id, `\x1b[200~${text}\x1b[201~`);
       term.focus();
-    }
+    };
+    sendPaths();
   };
 
   useEffect(() => {
