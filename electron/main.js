@@ -756,6 +756,7 @@ function createWindow() {
     ...windowOpts,
     minWidth: 800,
     minHeight: 600,
+    acceptFirstMouse: true,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#050508",
