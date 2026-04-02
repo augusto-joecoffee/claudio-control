@@ -61,6 +61,9 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
   const [tmuxSessionsLoading, setTmuxSessionsLoading] = useState(false);
   const [selectedTmuxSession, setSelectedTmuxSession] = useState<string>("");
+  const [worktrees, setWorktrees] = useState<{ path: string; branch: string | null; isMain: boolean }[]>([]);
+  const [worktreesLoading, setWorktreesLoading] = useState(false);
+  const [selectedWorktree, setSelectedWorktree] = useState("");
   const branchRef = useRef<HTMLInputElement>(null);
   const repoListRef = useRef<HTMLDivElement>(null);
   const isRepoMode = !repoPath;
@@ -157,6 +160,20 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
       })
       .catch(() => setTerminalConfig(null));
   }, [repoName]);
+
+  // Fetch existing worktrees when repo is known
+  useEffect(() => {
+    const targetRepo = repoPath || selectedRepo;
+    if (!targetRepo) return;
+
+    setWorktreesLoading(true);
+    setSelectedWorktree("");
+    fetch(`/api/worktrees?repoPath=${encodeURIComponent(targetRepo)}`)
+      .then((r) => r.json())
+      .then((data) => setWorktrees(data.worktrees ?? []))
+      .catch(() => setWorktrees([]))
+      .finally(() => setWorktreesLoading(false));
+  }, [repoPath, selectedRepo]);
 
   const [highlightedRepo, setHighlightedRepo] = useState(-1);
   const [prevRepoFilter, setPrevRepoFilter] = useState(repoFilter);
@@ -283,8 +300,9 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           repoPath: targetRepo,
-          branchName: branchName.trim() || undefined,
-          baseBranch: branchName.trim() ? baseBranch.trim() || undefined : undefined,
+          branchName: selectedWorktree ? undefined : branchName.trim() || undefined,
+          baseBranch: selectedWorktree ? undefined : (branchName.trim() ? baseBranch.trim() || undefined : undefined),
+          worktreePath: selectedWorktree || undefined,
           prompt: sendPrompt,
           tmuxSession: selectedTmuxSession || undefined,
         }),
@@ -525,6 +543,41 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
             </div>
           )}
 
+          {/* Existing worktree picker */}
+          {!needsSetup && !worktreesLoading && worktrees.filter((w) => !w.isMain).length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">Existing worktrees</label>
+              <div className="flex flex-wrap gap-1.5 mb-1">
+                {worktrees
+                  .filter((w) => !w.isMain)
+                  .map((w) => (
+                    <button
+                      key={w.path}
+                      type="button"
+                      onClick={() => {
+                        if (selectedWorktree === w.path) {
+                          setSelectedWorktree("");
+                        } else {
+                          setSelectedWorktree(w.path);
+                          setBranchName("");
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+                        selectedWorktree === w.path
+                          ? "bg-blue-500/20 border-blue-500/40 text-blue-300 border"
+                          : "bg-white/4 border border-white/7 text-zinc-400 hover:text-zinc-200 hover:border-white/15"
+                      }`}
+                    >
+                      {w.branch || w.path.split("/").pop()}
+                    </button>
+                  ))}
+              </div>
+              <p className="text-[11px] text-zinc-600 mt-1">
+                Select an existing worktree, or create a new one below.
+              </p>
+            </div>
+          )}
+
           {/* Branch name */}
           {!needsSetup && (
             <div>
@@ -536,9 +589,13 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
                 type="text"
                 placeholder="e.g. HQ-1234"
                 value={branchName}
-                onChange={(e) => setBranchName(e.target.value)}
+                disabled={!!selectedWorktree}
+                onChange={(e) => {
+                  setBranchName(e.target.value);
+                  setSelectedWorktree("");
+                }}
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors font-(family-name:--font-geist-mono)"
+                className={`w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors font-(family-name:--font-geist-mono) ${selectedWorktree ? "opacity-40 cursor-not-allowed" : ""}`}
               />
             </div>
           )}
@@ -638,6 +695,8 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
                     <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                     Creating...
                   </span>
+                ) : selectedWorktree ? (
+                  "Open Worktree & Launch"
                 ) : branchName ? (
                   "Create Worktree & Launch"
                 ) : (
