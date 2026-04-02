@@ -205,6 +205,53 @@ body {
   transform: translateX(-50%) scale(1);
 }
 
+/* react-diff-view dark theme overrides */
+.diff-viewer-container .diff {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d4d4d8;
+  background: #0a0a0f;
+}
+.diff-viewer-container .diff-gutter {
+  background: #0f0f14;
+  color: #52525b;
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  user-select: none;
+  min-width: 40px;
+  padding: 0 6px;
+  text-align: right;
+}
+.diff-viewer-container .diff-gutter:hover {
+  background: rgba(139, 92, 246, 0.1);
+  color: #a78bfa;
+}
+.diff-viewer-container .diff-code {
+  background: #0a0a0f;
+  padding-left: 12px;
+}
+.diff-viewer-container .diff-code-insert {
+  background: rgba(34, 197, 94, 0.06);
+}
+.diff-viewer-container .diff-code-delete {
+  background: rgba(239, 68, 68, 0.06);
+}
+.diff-viewer-container .diff-gutter-insert {
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+}
+.diff-viewer-container .diff-gutter-delete {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+}
+.diff-viewer-container .diff-widget {
+  background: transparent;
+}
+.diff-viewer-container .diff-widget-content {
+  padding: 0;
+}
+
 /* Gradient text */
 .text-gradient {
   background: linear-gradient(135deg, #E8956E 0%, #D97757 50%, #C4644A 100%);

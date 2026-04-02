@@ -176,3 +176,36 @@ export interface KanbanState {
   /** Prompts stored at session creation for kanban-enabled repos (keyed by working directory). */
   pendingPrompts?: Record<string, string>;
 }
+
+// ── Code Review ──
+
+export type ReviewCommentStatus = "pending" | "sending" | "processing" | "resolved";
+
+export interface ReviewComment {
+  id: string;
+  filePath: string;
+  /** Line number on the NEW side of the diff. */
+  line: number;
+  /** Original line number when comment was placed (for re-anchoring after edits). */
+  originalLine: number;
+  /** ~3 lines of surrounding code for fuzzy re-anchoring when lines shift. */
+  anchorSnippet: string;
+  content: string;
+  status: ReviewCommentStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+  /** Claude's response after processing this comment. */
+  response: string | null;
+}
+
+export interface ReviewSession {
+  sessionId: string;
+  workingDirectory: string;
+  baseBranch: string;
+  /** Commit SHA from git merge-base. */
+  mergeBase: string;
+  comments: ReviewComment[];
+  /** Index of the next comment to send to Claude. */
+  queueHead: number;
+  createdAt: string;
+}

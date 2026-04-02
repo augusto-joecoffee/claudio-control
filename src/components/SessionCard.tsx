@@ -314,6 +314,9 @@ export function SessionCard({
               onOpenTerminal={onOpenTerminal}
               hasActiveTerminal={hasActiveTerminal}
               hasInlineTerminal={hasInlineTerminal}
+              sessionId={session.id}
+              sessionName={session.repoName || session.workingDirectory.split("/").pop() || session.id}
+              hasChanges={!!session.git && (session.git.changedFiles > 0 || session.git.additions > 0 || session.git.untrackedFiles > 0)}
             />
           )}
         </div>

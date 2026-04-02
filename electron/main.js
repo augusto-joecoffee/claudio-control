@@ -152,6 +152,7 @@ try {
 }
 let mainWindow = null;
 let isQuitting = false;
+const reviewWindows = new Map(); // sessionId → BrowserWindow
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -502,6 +503,46 @@ ipcMain.handle("pty:listInlineTmux", async () => {
   } catch {
     return []; // tmux not running or no sessions
   }
+});
+
+// ── Code Review Window ──
+
+ipcMain.handle("review:openWindow", (_event, { sessionId, sessionName }) => {
+  if (reviewWindows.has(sessionId)) {
+    const existing = reviewWindows.get(sessionId);
+    if (!existing.isDestroyed()) {
+      existing.focus();
+      return;
+    }
+    reviewWindows.delete(sessionId);
+  }
+
+  const reviewWin = new BrowserWindow({
+    width: 1200,
+    height: 900,
+    minWidth: 800,
+    minHeight: 600,
+    title: `Review: ${sessionName || sessionId}`,
+    backgroundColor: "#050508",
+    icon: path.join(__dirname, "..", "public", "logo.png"),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+
+  reviewWin.loadURL(`http://localhost:${PORT}/review/${encodeURIComponent(sessionId)}`);
+  reviewWindows.set(sessionId, reviewWin);
+
+  reviewWin.on("closed", () => {
+    reviewWindows.delete(sessionId);
+  });
+
+  reviewWin.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
 });
 
 function killAllPtys() {

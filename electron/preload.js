@@ -21,4 +21,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getFilePath: (file) => webUtils.getPathForFile(file),
   ptyListInlineTmux: () => ipcRenderer.invoke("pty:listInlineTmux"),
+
+  // Code Review
+  openReviewWindow: (sessionId, sessionName) =>
+    ipcRenderer.invoke("review:openWindow", { sessionId, sessionName }),
 });
