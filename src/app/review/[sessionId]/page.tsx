@@ -211,6 +211,7 @@ export default function ReviewPage() {
 						selectedFile={selectedFile}
 						isViewed={isViewed}
 						onToggleViewed={toggleViewed}
+						sessionId={sessionId}
 					/>
 				)}
 			</div>

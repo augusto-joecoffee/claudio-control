@@ -21,6 +21,7 @@ interface DiffViewerProps {
 	selectedFile: string | null;
 	isViewed?: (path: string) => boolean;
 	onToggleViewed?: (path: string) => void;
+	sessionId?: string;
 }
 
 function getFilePath(file: FileData): string {
@@ -67,6 +68,25 @@ function findChangeIndexByNewLine(hunks: HunkData[], line: number): { hunk: Hunk
 	return null;
 }
 
+/** Build "normal" change entries from raw file lines for expanding context. */
+function buildNormalChanges(lines: string[], startLine: number, count: number): ChangeData[] {
+	const changes: ChangeData[] = [];
+	for (let i = 0; i < count; i++) {
+		const lineNum = startLine + i;
+		if (lineNum < 1 || lineNum > lines.length) continue;
+		changes.push({
+			type: "normal",
+			isNormal: true,
+			oldLineNumber: lineNum,
+			newLineNumber: lineNum,
+			content: lines[lineNum - 1] ?? "",
+		} as ChangeData);
+	}
+	return changes;
+}
+
+const EXPAND_STEP = 20;
+
 const FileDiff = memo(function FileDiff({
 	file,
 	viewType,
@@ -79,6 +99,7 @@ const FileDiff = memo(function FileDiff({
 	onDeleteComment,
 	isViewed,
 	onToggleViewed,
+	sessionId,
 }: {
 	file: FileData;
 	viewType: ViewType;
@@ -91,8 +112,73 @@ const FileDiff = memo(function FileDiff({
 	onDeleteComment?: (id: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
+	sessionId?: string;
 }) {
 	const filePath = getFilePath(file);
+
+	// File lines cache for expanding context
+	const [fileLines, setFileLines] = useState<string[] | null>(null);
+	const [expandedHunks, setExpandedHunks] = useState<HunkData[]>(file.hunks);
+
+	// Reset expanded hunks when the file changes
+	useEffect(() => { setExpandedHunks(file.hunks); }, [file.hunks]);
+
+	const fetchFileLines = useCallback(async () => {
+		if (fileLines || !sessionId) return fileLines;
+		try {
+			const res = await fetch(`/api/review/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(filePath)}`);
+			if (!res.ok) return null;
+			const { lines } = await res.json();
+			setFileLines(lines);
+			return lines as string[];
+		} catch { return null; }
+	}, [fileLines, sessionId, filePath]);
+
+	const expandUp = useCallback(async (hunkIndex: number) => {
+		const lines = await fetchFileLines();
+		if (!lines) return;
+		setExpandedHunks((prev) => {
+			const hunks = prev.map((h) => ({ ...h, changes: [...h.changes] }));
+			const hunk = hunks[hunkIndex];
+			const firstChange = hunk.changes[0];
+			const firstLine = firstChange?.type === "normal" ? firstChange.oldLineNumber
+				: firstChange?.type === "delete" ? firstChange.lineNumber : 1;
+			const prevHunk = hunkIndex > 0 ? hunks[hunkIndex - 1] : null;
+			const prevLastChange = prevHunk?.changes[prevHunk.changes.length - 1];
+			const prevLastLine = prevLastChange?.type === "normal" ? prevLastChange.oldLineNumber
+				: prevLastChange?.type === "insert" ? prevLastChange.lineNumber : 0;
+			const gapStart = prevLastLine + 1;
+			const gapEnd = firstLine - 1;
+			const expandFrom = Math.max(gapStart, gapEnd - EXPAND_STEP + 1);
+			const newChanges = buildNormalChanges(lines, expandFrom, gapEnd - expandFrom + 1);
+			hunk.changes = [...newChanges, ...hunk.changes];
+			hunk.oldStart = expandFrom;
+			hunk.newStart = expandFrom;
+			return hunks;
+		});
+	}, [fetchFileLines]);
+
+	const expandDown = useCallback(async (hunkIndex: number) => {
+		const lines = await fetchFileLines();
+		if (!lines) return;
+		setExpandedHunks((prev) => {
+			const hunks = prev.map((h) => ({ ...h, changes: [...h.changes] }));
+			const hunk = hunks[hunkIndex];
+			const lastChange = hunk.changes[hunk.changes.length - 1];
+			const lastLine = lastChange?.type === "normal" ? lastChange.oldLineNumber
+				: lastChange?.type === "insert" ? lastChange.lineNumber : 0;
+			const nextHunk = hunkIndex < hunks.length - 1 ? hunks[hunkIndex + 1] : null;
+			const nextFirstChange = nextHunk?.changes[0];
+			const nextFirstLine = nextFirstChange?.type === "normal" ? nextFirstChange.oldLineNumber
+				: nextFirstChange?.type === "delete" ? nextFirstChange.lineNumber : lines.length + 1;
+			const gapStart = lastLine + 1;
+			const gapEnd = Math.min(nextFirstLine - 1, lines.length);
+			const expandTo = Math.min(gapEnd, gapStart + EXPAND_STEP - 1);
+			const newChanges = buildNormalChanges(lines, gapStart, expandTo - gapStart + 1);
+			hunk.changes = [...hunk.changes, ...newChanges];
+			return hunks;
+		});
+	}, [fetchFileLines]);
 	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath), [comments, filePath]);
 	const fileRef = useRef<HTMLDivElement>(null);
 
@@ -214,24 +300,62 @@ const FileDiff = memo(function FileDiff({
 
 			{/* Diff content — collapse when viewed */}
 			{!isViewed && <div className="border border-t-0 border-zinc-800/50 rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }}>
-				{file.hunks.length > 0 ? (
+				{expandedHunks.length > 0 ? (
 					<Diff
 						viewType={viewType}
 						diffType={file.type}
-						hunks={file.hunks}
+						hunks={expandedHunks}
 						widgets={widgets}
 						renderGutter={renderGutter}
 						gutterEvents={gutterEvents}
 					>
 						{(hunks: HunkData[]) =>
-							hunks.flatMap((hunk) => [
-								<Decoration key={`decoration-${hunk.content}`}>
-									<div className="px-3 py-1 bg-blue-500/5 text-[10px] text-blue-400 font-mono border-y border-blue-500/10">
-										{hunk.content}
-									</div>
-								</Decoration>,
-								<Hunk key={hunk.content} hunk={hunk} />,
-							])
+							hunks.flatMap((hunk, idx) => {
+								const hunkIdx = expandedHunks.indexOf(hunk);
+								const firstChange = hunk.changes[0];
+								const firstLine = firstChange?.type === "normal" ? firstChange.oldLineNumber
+									: firstChange?.type === "delete" ? firstChange.lineNumber : 1;
+								const canExpandUp = sessionId && firstLine > 1;
+								const lastChange = hunk.changes[hunk.changes.length - 1];
+								const lastLine = lastChange?.type === "normal" ? lastChange.oldLineNumber
+									: lastChange?.type === "insert" ? lastChange.lineNumber : 0;
+								const nextHunk = idx < hunks.length - 1 ? hunks[idx + 1] : null;
+								const nextFirst = nextHunk?.changes[0];
+								const nextFirstLine = nextFirst?.type === "normal" ? nextFirst.oldLineNumber
+									: nextFirst?.type === "delete" ? nextFirst.lineNumber : null;
+								const canExpandDown = sessionId && (nextFirstLine ? lastLine < nextFirstLine - 1 : lastLine > 0);
+
+								return [
+									<Decoration key={`decoration-${hunk.content}`}>
+										<div className="px-3 py-0.5 bg-blue-500/5 text-[10px] text-blue-400 font-mono border-y border-blue-500/10 flex items-center justify-between">
+											<span>{hunk.content}</span>
+											{canExpandUp && (
+												<button
+													onClick={() => expandUp(hunkIdx)}
+													className="text-zinc-500 hover:text-blue-400 transition-colors px-1"
+													title={`Show ${EXPAND_STEP} more lines above`}
+												>
+													↑ Expand
+												</button>
+											)}
+										</div>
+									</Decoration>,
+									<Hunk key={hunk.content} hunk={hunk} />,
+									...(canExpandDown ? [
+										<Decoration key={`expand-down-${hunk.content}`}>
+											<div className="flex justify-center py-0.5 bg-blue-500/5 border-y border-blue-500/10">
+												<button
+													onClick={() => expandDown(hunkIdx)}
+													className="text-[10px] text-zinc-500 hover:text-blue-400 transition-colors px-2"
+													title={`Show ${EXPAND_STEP} more lines below`}
+												>
+													↓ Expand
+												</button>
+											</div>
+										</Decoration>,
+									] : []),
+								];
+							})
 						}
 					</Diff>
 				) : (
@@ -255,6 +379,7 @@ function LazyFileDiff(props: {
 	onDeleteComment?: (id: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
+	sessionId?: string;
 }) {
 	const [visible, setVisible] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -291,6 +416,7 @@ export const DiffViewer = memo(function DiffViewer({
 	selectedFile,
 	isViewed,
 	onToggleViewed,
+	sessionId,
 }: DiffViewerProps) {
 	const files = useMemo(() => {
 		if (!rawDiff) return [];
@@ -329,6 +455,7 @@ export const DiffViewer = memo(function DiffViewer({
 					onDeleteComment={onDeleteComment}
 					isViewed={isViewed?.(selectedFile) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(selectedFile!) : undefined}
+				sessionId={sessionId}
 				/>
 			</div>
 		);
@@ -353,6 +480,7 @@ export const DiffViewer = memo(function DiffViewer({
 					onDeleteComment={onDeleteComment}
 					isViewed={isViewed?.(fp) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(fp) : undefined}
+				sessionId={sessionId}
 				/>
 				);
 			})}
