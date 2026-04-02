@@ -518,22 +518,30 @@ ipcMain.handle("review:openWindow", (_event, { sessionId, sessionName }) => {
   }
 
   const savedState = loadWindowState("review");
-  const targetDisplay = findMatchingDisplay(savedState);
 
   let windowOpts = { width: 1200, height: 900 };
 
-  if (savedState && targetDisplay) {
-    windowOpts = {
-      x: savedState.x,
-      y: savedState.y,
-      width: savedState.width,
-      height: savedState.height,
-    };
-  } else if (savedState) {
-    windowOpts = {
-      width: savedState.width,
-      height: savedState.height,
-    };
+  if (savedState) {
+    windowOpts.width = savedState.width;
+    windowOpts.height = savedState.height;
+
+    if ((savedState.isFullScreen || savedState.isMaximized) && savedState.displayBounds) {
+      // normalBounds x/y can be on a different display than where the window
+      // was actually fullscreened — use the saved display bounds to target the right monitor
+      const db = savedState.displayBounds;
+      const target = screen.getDisplayNearestPoint({ x: db.x + db.width / 2, y: db.y + db.height / 2 });
+      windowOpts.x = target.bounds.x + Math.round((target.bounds.width - windowOpts.width) / 2);
+      windowOpts.y = target.bounds.y + Math.round((target.bounds.height - windowOpts.height) / 2);
+    } else {
+      // Normal window — use exact saved position if still on a connected display
+      const nearest = screen.getDisplayNearestPoint({ x: savedState.x, y: savedState.y });
+      const b = nearest.bounds;
+      if (savedState.x >= b.x && savedState.x < b.x + b.width &&
+          savedState.y >= b.y && savedState.y < b.y + b.height) {
+        windowOpts.x = savedState.x;
+        windowOpts.y = savedState.y;
+      }
+    }
   }
 
   const reviewWin = new BrowserWindow({
@@ -557,7 +565,7 @@ ipcMain.handle("review:openWindow", (_event, { sessionId, sessionName }) => {
   reviewWin.once("ready-to-show", () => {
     if (savedState?.isFullScreen) {
       reviewWin.setFullScreen(true);
-    } else if (savedState?.isMaximized && targetDisplay) {
+    } else if (savedState?.isMaximized) {
       reviewWin.maximize();
     }
     reviewWin.show();
@@ -669,24 +677,27 @@ function findMatchingDisplay(savedState) {
 
 function createWindow() {
   const savedState = loadWindowState("main");
-  const targetDisplay = findMatchingDisplay(savedState);
 
   let windowOpts = { width: 1400, height: 900 };
 
-  if (savedState && targetDisplay) {
-    // Restore size, position on the correct display
-    windowOpts = {
-      x: savedState.x,
-      y: savedState.y,
-      width: savedState.width,
-      height: savedState.height,
-    };
-  } else if (savedState) {
-    // Display gone — use saved size, let OS pick position
-    windowOpts = {
-      width: savedState.width,
-      height: savedState.height,
-    };
+  if (savedState) {
+    windowOpts.width = savedState.width;
+    windowOpts.height = savedState.height;
+
+    if ((savedState.isFullScreen || savedState.isMaximized) && savedState.displayBounds) {
+      const db = savedState.displayBounds;
+      const target = screen.getDisplayNearestPoint({ x: db.x + db.width / 2, y: db.y + db.height / 2 });
+      windowOpts.x = target.bounds.x + Math.round((target.bounds.width - windowOpts.width) / 2);
+      windowOpts.y = target.bounds.y + Math.round((target.bounds.height - windowOpts.height) / 2);
+    } else {
+      const nearest = screen.getDisplayNearestPoint({ x: savedState.x, y: savedState.y });
+      const b = nearest.bounds;
+      if (savedState.x >= b.x && savedState.x < b.x + b.width &&
+          savedState.y >= b.y && savedState.y < b.y + b.height) {
+        windowOpts.x = savedState.x;
+        windowOpts.y = savedState.y;
+      }
+    }
   }
 
   mainWindow = new BrowserWindow({
@@ -712,7 +723,7 @@ function createWindow() {
     // Restore maximized/fullscreen after the window is on the correct display
     if (savedState?.isFullScreen) {
       mainWindow.setFullScreen(true);
-    } else if (savedState?.isMaximized && targetDisplay) {
+    } else if (savedState?.isMaximized) {
       mainWindow.maximize();
     }
     mainWindow.show();
