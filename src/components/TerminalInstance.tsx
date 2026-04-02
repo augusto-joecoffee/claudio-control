@@ -316,9 +316,6 @@ export function TerminalInstance({
       .map((f) => api.getFilePath(f))
       .filter(Boolean);
     if (paths.length > 0) {
-      // Shell-escape paths that contain spaces, then send to the PTY
-      // wrapped in explicit bracketed paste sequences so Claude Code
-      // (and other apps that enable DECSET 2004) detect the file drop.
       const escaped = paths.map((p) => (p.includes(" ") ? `"${p}"` : p));
       const text = escaped.join(" ");
       api.ptyWrite(id, `\x1b[200~${text}\x1b[201~`);

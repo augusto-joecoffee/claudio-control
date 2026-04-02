@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState, useTransition } from "react";
 import type { ViewType } from "react-diff-view";
 import { useReview } from "@/hooks/useReview";
 import { useReviewDiff } from "@/hooks/useReviewDiff";
@@ -85,9 +85,13 @@ export default function ReviewPage() {
 		setActiveComment(null);
 	}, []);
 
+	const [, startTransition] = useTransition();
+
 	const handleToggleView = useCallback(() => {
-		setViewType((v) => (v === "split" ? "unified" : "split"));
-	}, []);
+		startTransition(() => {
+			setViewType((v) => (v === "split" ? "unified" : "split"));
+		});
+	}, [startTransition]);
 
 	const handleTogglePause = useCallback(() => {
 		setPaused((p) => !p);

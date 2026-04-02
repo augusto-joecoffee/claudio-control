@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Diff, Hunk, Decoration, parseDiff, getChangeKey } from "react-diff-view";
 import type { FileData, ChangeData, HunkData } from "react-diff-view";
 import type { GutterOptions, ViewType } from "react-diff-view";
@@ -209,6 +209,38 @@ const FileDiff = memo(function FileDiff({
 	);
 });
 
+/** Only mount FileDiff when the placeholder scrolls into view. */
+function LazyFileDiff(props: {
+	file: FileData;
+	viewType: ViewType;
+	comments: ReviewComment[];
+	activeCommentLocation: { filePath: string; line: number } | null;
+	onGutterClick: (filePath: string, line: number, anchorSnippet: string) => void;
+	onSubmitComment: (content: string) => void;
+	onCancelComment: () => void;
+}) {
+	const [visible, setVisible] = useState(false);
+	const ref = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const observer = new IntersectionObserver(
+			([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
+			{ rootMargin: "200px" },
+		);
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+
+	if (!visible) {
+		const lineCount = props.file.hunks.reduce((n, h) => n + h.changes.length, 0);
+		return <div ref={ref} style={{ minHeight: Math.max(60, lineCount * 20) }} className="mb-4" />;
+	}
+
+	return <FileDiff {...props} />;
+}
+
 export const DiffViewer = memo(function DiffViewer({
 	rawDiff,
 	viewType,
@@ -237,15 +269,31 @@ export const DiffViewer = memo(function DiffViewer({
 		);
 	}
 
-	// If a file is selected, only show that file
-	const filesToRender = selectedFile
-		? files.filter((f) => getFilePath(f) === selectedFile)
-		: files;
+	// If a file is selected, only show that file (no lazy wrapper needed)
+	if (selectedFile) {
+		const file = files.find((f) => getFilePath(f) === selectedFile);
+		if (!file) return null;
+		return (
+			<div className="flex-1 overflow-y-auto px-4 py-3">
+				<FileDiff
+					key={getFilePath(file)}
+					file={file}
+					viewType={viewType}
+					comments={comments}
+					activeCommentLocation={activeCommentLocation}
+					onGutterClick={onGutterClick}
+					onSubmitComment={onSubmitComment}
+					onCancelComment={onCancelComment}
+				/>
+			</div>
+		);
+	}
 
+	// All files: lazy-render so only visible diffs mount
 	return (
 		<div className="flex-1 overflow-y-auto px-4 py-3">
-			{filesToRender.map((file) => (
-				<FileDiff
+			{files.map((file) => (
+				<LazyFileDiff
 					key={getFilePath(file)}
 					file={file}
 					viewType={viewType}
