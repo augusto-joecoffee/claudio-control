@@ -577,15 +577,23 @@ ipcMain.handle("review:openWindow", (_event, { sessionId, sessionName }) => {
     windowOpts.width = savedState.width;
     windowOpts.height = savedState.height;
 
+    const targetDisplay = findMatchingDisplay(savedState);
+
     if ((savedState.isFullScreen || savedState.isMaximized) && savedState.displayBounds) {
-      // normalBounds x/y can be on a different display than where the window
-      // was actually fullscreened — use the saved display bounds to target the right monitor
-      const db = savedState.displayBounds;
-      const target = screen.getDisplayNearestPoint({ x: db.x + db.width / 2, y: db.y + db.height / 2 });
+      const target = targetDisplay || screen.getDisplayNearestPoint({
+        x: savedState.displayBounds.x + savedState.displayBounds.width / 2,
+        y: savedState.displayBounds.y + savedState.displayBounds.height / 2,
+      });
       windowOpts.x = target.bounds.x + Math.round((target.bounds.width - windowOpts.width) / 2);
       windowOpts.y = target.bounds.y + Math.round((target.bounds.height - windowOpts.height) / 2);
+    } else if (targetDisplay) {
+      const b = targetDisplay.bounds;
+      if (savedState.x >= b.x && savedState.x < b.x + b.width &&
+          savedState.y >= b.y && savedState.y < b.y + b.height) {
+        windowOpts.x = savedState.x;
+        windowOpts.y = savedState.y;
+      }
     } else {
-      // Normal window — use exact saved position if still on a connected display
       const nearest = screen.getDisplayNearestPoint({ x: savedState.x, y: savedState.y });
       const b = nearest.bounds;
       if (savedState.x >= b.x && savedState.x < b.x + b.width &&
@@ -704,7 +712,37 @@ function saveWindowState(win, key) {
     displayBounds: display.bounds,
   };
 
-  fs.promises.writeFile(getWindowStatePath(key), JSON.stringify(state, null, 2)).catch(() => {});
+  fs.promises.writeFile(getWindowStatePath(key), JSON.stringify(state, null, 2)).catch((err) => {
+    console.error(`[saveWindowState] Failed to save ${key} state:`, err);
+  });
+}
+
+/** Synchronous save for use during quit — ensures state is flushed before the process exits. */
+function saveWindowStateSync(win, key) {
+  if (!win || win.isDestroyed()) return;
+
+  const isMaximized = win.isMaximized();
+  const isFullScreen = win.isFullScreen();
+  const bounds = win.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const normalBounds = win.getNormalBounds();
+
+  const state = {
+    x: normalBounds.x,
+    y: normalBounds.y,
+    width: normalBounds.width,
+    height: normalBounds.height,
+    isMaximized,
+    isFullScreen,
+    displayId: display.id,
+    displayBounds: display.bounds,
+  };
+
+  try {
+    fs.writeFileSync(getWindowStatePath(key), JSON.stringify(state, null, 2));
+  } catch (err) {
+    console.error(`[saveWindowStateSync] Failed to save ${key} state:`, err);
+  }
 }
 
 function findMatchingDisplay(savedState) {
@@ -736,12 +774,25 @@ function createWindow() {
     windowOpts.width = savedState.width;
     windowOpts.height = savedState.height;
 
+    const targetDisplay = findMatchingDisplay(savedState);
+
     if ((savedState.isFullScreen || savedState.isMaximized) && savedState.displayBounds) {
-      const db = savedState.displayBounds;
-      const target = screen.getDisplayNearestPoint({ x: db.x + db.width / 2, y: db.y + db.height / 2 });
+      const target = targetDisplay || screen.getDisplayNearestPoint({
+        x: savedState.displayBounds.x + savedState.displayBounds.width / 2,
+        y: savedState.displayBounds.y + savedState.displayBounds.height / 2,
+      });
       windowOpts.x = target.bounds.x + Math.round((target.bounds.width - windowOpts.width) / 2);
       windowOpts.y = target.bounds.y + Math.round((target.bounds.height - windowOpts.height) / 2);
+    } else if (targetDisplay) {
+      // Display found — use saved position if it's within bounds
+      const b = targetDisplay.bounds;
+      if (savedState.x >= b.x && savedState.x < b.x + b.width &&
+          savedState.y >= b.y && savedState.y < b.y + b.height) {
+        windowOpts.x = savedState.x;
+        windowOpts.y = savedState.y;
+      }
     } else {
+      // Fallback: find nearest display to the saved position
       const nearest = screen.getDisplayNearestPoint({ x: savedState.x, y: savedState.y });
       const b = nearest.bounds;
       if (savedState.x >= b.x && savedState.x < b.x + b.width &&
@@ -834,6 +885,18 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+
+  // Synchronously flush window state before the process exits —
+  // the debounced async saves may not have fired yet.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    saveWindowStateSync(mainWindow, "main");
+  }
+  for (const [, win] of reviewWindows) {
+    if (win && !win.isDestroyed()) {
+      saveWindowStateSync(win, "review");
+    }
+  }
+
   killAllPtys();
   if (nextProcess) {
     nextProcess.kill();

@@ -17,6 +17,25 @@ async function gitCommand(args: string[], cwd: string): Promise<string> {
 	}
 }
 
+/**
+ * Fast fingerprint of the current diff state.
+ * Uses --stat (which relies on git's stat cache) + HEAD hash + untracked file list.
+ * Changes whenever a file is committed, edited, staged, or added/removed.
+ */
+export async function getDiffFingerprint(cwd: string, mergeBase: string): Promise<string> {
+	const [head, stat, untracked] = await Promise.all([
+		gitCommand(["rev-parse", "HEAD"], cwd),
+		gitCommand(["diff", mergeBase, "--stat"], cwd),
+		gitCommand(["ls-files", "--others", "--exclude-standard"], cwd),
+	]);
+	const combined = `${head}\n${stat}\n${untracked}`;
+	let h = 0;
+	for (let i = 0; i < combined.length; i++) {
+		h = ((h << 5) - h + combined.charCodeAt(i)) | 0;
+	}
+	return h.toString(36);
+}
+
 export async function getMergeBase(cwd: string, baseBranch: string): Promise<string> {
 	return gitCommand(["merge-base", "HEAD", baseBranch], cwd);
 }
@@ -57,20 +76,21 @@ export async function getDefaultBranch(cwd: string): Promise<string> {
 }
 
 /**
- * Get the full unified diff between merge-base and HEAD, including working tree changes.
+ * Get the full unified diff between merge-base and the working tree.
+ * Uses a single `git diff mergeBase` so each file appears once with a clean diff.
  * Returns raw unified diff text for react-diff-view's parseDiff().
  */
 export async function getFullDiff(cwd: string, mergeBase: string): Promise<string> {
-	// Run all independent git commands in parallel
-	const [committedDiff, workingDiff, untrackedRaw] = await Promise.all([
-		gitCommand(["diff", `${mergeBase}..HEAD`, "--unified=5"], cwd),
-		gitCommand(["diff", "HEAD", "--unified=5"], cwd),
+	// git diff <mergeBase> (no ..HEAD) diffs merge-base directly against the working tree,
+	// producing a single clean diff per file that includes both committed and uncommitted changes.
+	const [fullDiff, untrackedRaw] = await Promise.all([
+		gitCommand(["diff", mergeBase, "--unified=5"], cwd),
 		gitCommand(["ls-files", "--others", "--exclude-standard"], cwd),
 	]);
 
 	const untrackedFiles = untrackedRaw.split("\n").filter(Boolean);
 
-	// Batch all untracked file diffs in parallel instead of sequential
+	// Batch all untracked file diffs in parallel
 	const untrackedDiffs = await Promise.all(
 		untrackedFiles.map(async (file) => {
 			try {
@@ -88,8 +108,22 @@ export async function getFullDiff(cwd: string, mergeBase: string): Promise<strin
 		}),
 	);
 
-	const parts = [committedDiff, workingDiff, ...untrackedDiffs].filter(Boolean);
+	const parts = [fullDiff, ...untrackedDiffs].filter(Boolean);
 	return parts.join("\n");
+}
+
+/**
+ * Get the list of files that have uncommitted changes (staged, unstaged, or untracked).
+ */
+export async function getUncommittedFiles(cwd: string): Promise<string[]> {
+	const [changedRaw, untrackedRaw] = await Promise.all([
+		gitCommand(["diff", "HEAD", "--name-only"], cwd),
+		gitCommand(["ls-files", "--others", "--exclude-standard"], cwd),
+	]);
+	const files = new Set<string>();
+	for (const f of changedRaw.split("\n").filter(Boolean)) files.add(f);
+	for (const f of untrackedRaw.split("\n").filter(Boolean)) files.add(f);
+	return Array.from(files);
 }
 
 /**
@@ -163,10 +197,5 @@ export async function getCommits(cwd: string, mergeBase: string): Promise<{ hash
  * Get a compact stat summary for the file tree sidebar.
  */
 export async function getDiffStat(cwd: string, mergeBase: string): Promise<string> {
-	const [committedStat, workingStat] = await Promise.all([
-		gitCommand(["diff", `${mergeBase}..HEAD`, "--stat"], cwd),
-		gitCommand(["diff", "HEAD", "--stat"], cwd),
-	]);
-	const parts = [committedStat, workingStat].filter(Boolean);
-	return parts.join("\n");
+	return gitCommand(["diff", mergeBase, "--stat"], cwd);
 }

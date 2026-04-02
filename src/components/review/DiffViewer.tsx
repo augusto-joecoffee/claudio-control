@@ -1,12 +1,21 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Diff, Hunk, Decoration, parseDiff, getChangeKey } from "react-diff-view";
+import { Diff, Hunk, Decoration, parseDiff, getChangeKey, tokenize } from "react-diff-view";
 import type { FileData, ChangeData, HunkData } from "react-diff-view";
 import type { GutterOptions, ViewType } from "react-diff-view";
+import { refractor as _refractor } from "refractor";
+
+// react-diff-view's tokenize expects highlight() to return an iterable (array of nodes),
+// but refractor v5 returns a Root node. Adapt by returning .children.
+const refractor = {
+	highlight: (code: string, language: string) => _refractor.highlight(code, language).children,
+	registered: (lang: string) => _refractor.registered(lang),
+};
 import type { ReviewComment } from "@/lib/types";
 import { CommentThread } from "./CommentThread";
 import "react-diff-view/style/index.css";
+import "./syntax-theme.css";
 
 interface DiffViewerProps {
 	rawDiff: string;
@@ -22,10 +31,51 @@ interface DiffViewerProps {
 	isViewed?: (path: string) => boolean;
 	onToggleViewed?: (path: string) => void;
 	sessionId?: string;
+	onOpenInEditor?: (filePath: string) => void;
 }
 
 function getFilePath(file: FileData): string {
 	return file.newPath === "/dev/null" ? file.oldPath : file.newPath;
+}
+
+const EXT_TO_LANG: Record<string, string> = {
+	ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+	py: "python", rb: "ruby", rs: "rust", go: "go", java: "java", kt: "kotlin", kts: "kotlin",
+	c: "c", h: "c", cpp: "cpp", cc: "cpp", cs: "csharp",
+	html: "markup", htm: "markup", xml: "markup", svg: "markup",
+	css: "css", scss: "css", less: "css",
+	json: "json", yaml: "yaml", yml: "yaml", toml: "toml",
+	sh: "bash", bash: "bash", zsh: "bash",
+	md: "markdown", mdx: "markdown",
+	sql: "sql", graphql: "graphql", gql: "graphql",
+	swift: "swift", dart: "dart", lua: "lua", r: "r",
+	dockerfile: "docker", makefile: "makefile",
+};
+
+function detectLanguage(filePath: string): string | null {
+	const name = filePath.split("/").pop()?.toLowerCase() ?? "";
+	if (name === "dockerfile") return "docker";
+	if (name === "makefile") return "makefile";
+	const ext = name.split(".").pop() ?? "";
+	const lang = EXT_TO_LANG[ext];
+	if (!lang) return null;
+	try {
+		if (refractor.registered(lang)) return lang;
+	} catch { /* ignore */ }
+	return null;
+}
+
+function useTokens(hunks: HunkData[], filePath: string) {
+	return useMemo(() => {
+		const lang = detectLanguage(filePath);
+		if (!lang || hunks.length === 0) return undefined;
+		try {
+			return tokenize(hunks, { highlight: true, refractor, language: lang });
+		} catch (e) {
+			console.warn("[syntax] tokenize failed for", filePath, e);
+			return undefined;
+		}
+	}, [hunks, filePath]);
 }
 
 /** Parse a unified diff and deduplicate entries that share the same file path. */
@@ -100,6 +150,7 @@ const FileDiff = memo(function FileDiff({
 	isViewed,
 	onToggleViewed,
 	sessionId,
+	onOpenInEditor,
 }: {
 	file: FileData;
 	viewType: ViewType;
@@ -113,6 +164,7 @@ const FileDiff = memo(function FileDiff({
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
+	onOpenInEditor?: (filePath: string) => void;
 }) {
 	const filePath = getFilePath(file);
 
@@ -122,6 +174,8 @@ const FileDiff = memo(function FileDiff({
 
 	// Reset expanded hunks when the file changes
 	useEffect(() => { setExpandedHunks(file.hunks); }, [file.hunks]);
+
+	const tokens = useTokens(expandedHunks, filePath);
 
 	const fetchFileLines = useCallback(async () => {
 		if (fileLines || !sessionId) return fileLines;
@@ -278,8 +332,11 @@ const FileDiff = memo(function FileDiff({
 				</span>
 				<span
 					className="text-xs text-zinc-300 font-mono cursor-pointer hover:text-zinc-100 transition-colors flex-1"
-					onClick={() => navigator.clipboard.writeText(filePath)}
-					title="Click to copy path"
+					onClick={() => {
+						navigator.clipboard.writeText(filePath);
+						onOpenInEditor?.(filePath);
+					}}
+					title="Click to copy path & open in editor"
 				>{filePath}</span>
 				{onToggleViewed && (
 					<button
@@ -290,8 +347,12 @@ const FileDiff = memo(function FileDiff({
 								: "border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600"
 						}`}
 					>
-						<svg className="w-3 h-3" fill={isViewed ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-							<path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+						<svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+							{isViewed ? (
+								<path d="M4.5 12.75l6 6 9-13.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="text-emerald-400" />
+							) : (
+								<rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+							)}
 						</svg>
 						Viewed
 					</button>
@@ -306,6 +367,7 @@ const FileDiff = memo(function FileDiff({
 						diffType={file.type}
 						hunks={expandedHunks}
 						widgets={widgets}
+						tokens={tokens}
 						renderGutter={renderGutter}
 						gutterEvents={gutterEvents}
 					>
@@ -397,6 +459,7 @@ function LazyFileDiff(props: {
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
+	onOpenInEditor?: (filePath: string) => void;
 }) {
 	const [visible, setVisible] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -434,6 +497,7 @@ export const DiffViewer = memo(function DiffViewer({
 	isViewed,
 	onToggleViewed,
 	sessionId,
+	onOpenInEditor,
 }: DiffViewerProps) {
 	const files = useMemo(() => {
 		if (!rawDiff) return [];
@@ -472,7 +536,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onDeleteComment={onDeleteComment}
 					isViewed={isViewed?.(selectedFile) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(selectedFile!) : undefined}
-				sessionId={sessionId}
+					sessionId={sessionId}
+					onOpenInEditor={onOpenInEditor}
 				/>
 			</div>
 		);
@@ -497,7 +562,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onDeleteComment={onDeleteComment}
 					isViewed={isViewed?.(fp) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(fp) : undefined}
-				sessionId={sessionId}
+					sessionId={sessionId}
+					onOpenInEditor={onOpenInEditor}
 				/>
 				);
 			})}

@@ -1,34 +1,97 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { FileData, HunkData } from "react-diff-view";
 
 const STORAGE_KEY = "review-viewed-files";
 
-function loadViewed(sessionId: string): Set<string> {
+/** Simple hash of a file's diff hunks — changes when the diff content changes. */
+function hashHunks(hunks: HunkData[]): string {
+	let h = 0;
+	for (const hunk of hunks) {
+		for (const change of hunk.changes) {
+			const s = change.content;
+			for (let i = 0; i < s.length; i++) {
+				h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+			}
+		}
+	}
+	return h.toString(36);
+}
+
+// Storage: { [filePath]: diffHash }
+type ViewedMap = Record<string, string>;
+
+function loadViewed(sessionId: string): ViewedMap {
 	try {
 		const raw = localStorage.getItem(`${STORAGE_KEY}:${sessionId}`);
-		return raw ? new Set(JSON.parse(raw)) : new Set();
+		if (!raw) return {};
+		const parsed = JSON.parse(raw);
+		// Migrate from old format (string[])
+		if (Array.isArray(parsed)) {
+			const map: ViewedMap = {};
+			for (const fp of parsed) map[fp] = "";
+			return map;
+		}
+		return parsed;
 	} catch {
-		return new Set();
+		return {};
 	}
 }
 
-function saveViewed(sessionId: string, viewed: Set<string>) {
-	localStorage.setItem(`${STORAGE_KEY}:${sessionId}`, JSON.stringify([...viewed]));
+function saveViewed(sessionId: string, viewed: ViewedMap) {
+	localStorage.setItem(`${STORAGE_KEY}:${sessionId}`, JSON.stringify(viewed));
 }
 
-export function useViewedFiles(sessionId: string) {
-	const [viewed, setViewed] = useState<Set<string>>(() => loadViewed(sessionId));
+function getFilePath(file: FileData): string {
+	return file.newPath === "/dev/null" ? file.oldPath : file.newPath;
+}
 
-	const toggleViewed = useCallback((filePath: string) => {
+export function useViewedFiles(sessionId: string, files: FileData[]) {
+	const [viewed, setViewed] = useState<ViewedMap>(() => loadViewed(sessionId));
+
+	// Auto-unmark files whose diff has changed since they were marked viewed.
+	useEffect(() => {
+		if (files.length === 0) return;
+
 		setViewed((prev) => {
-			const next = new Set(prev);
-			if (next.has(filePath)) next.delete(filePath);
-			else next.add(filePath);
+			const stale: string[] = [];
+			for (const file of files) {
+				const fp = getFilePath(file);
+				const storedHash = prev[fp];
+				if (storedHash === undefined) continue; // not viewed
+				if (storedHash === "") continue; // migrated entry, no hash to compare
+				const currentHash = hashHunks(file.hunks);
+				if (storedHash !== currentHash) stale.push(fp);
+			}
+			if (stale.length === 0) return prev;
+
+			const next = { ...prev };
+			for (const fp of stale) delete next[fp];
 			saveViewed(sessionId, next);
 			return next;
 		});
-	}, [sessionId]);
+	}, [files, sessionId]);
 
-	const isViewed = useCallback((filePath: string) => viewed.has(filePath), [viewed]);
+	const toggleViewed = useCallback(
+		(filePath: string) => {
+			setViewed((prev) => {
+				const next = { ...prev };
+				if (filePath in next) {
+					delete next[filePath];
+				} else {
+					// Find the file and compute its hash
+					const file = files.find((f) => getFilePath(f) === filePath);
+					next[filePath] = file ? hashHunks(file.hunks) : "";
+				}
+				saveViewed(sessionId, next);
+				return next;
+			});
+		},
+		[sessionId, files],
+	);
 
-	return { viewed, viewedCount: viewed.size, toggleViewed, isViewed };
+	const isViewed = useCallback((filePath: string) => filePath in viewed, [viewed]);
+
+	const viewedCount = Object.keys(viewed).length;
+
+	return { viewedCount, toggleViewed, isViewed };
 }

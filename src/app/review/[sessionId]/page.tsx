@@ -9,6 +9,7 @@ import { useReviewQueue } from "@/hooks/useReviewQueue";
 import { useReviewCommits } from "@/hooks/useReviewCommits";
 import { useReviewBranches } from "@/hooks/useReviewBranches";
 import { useViewedFiles } from "@/hooks/useViewedFiles";
+import { useAutoRefreshDiff } from "@/hooks/useAutoRefreshDiff";
 import { DiffViewer, parseDiff, getFilePath } from "@/components/review/DiffViewer";
 import { FileTree } from "@/components/review/FileTree";
 import { CommentQueue } from "@/components/review/CommentQueue";
@@ -20,10 +21,9 @@ export default function ReviewPage() {
 
 	const { review, comments, addComment, refresh: refreshReview } = useReview(sessionId);
 	const [selectedCommit, setSelectedCommit] = useState("all");
-	const { diff, isLoading: diffLoading, refreshDiff } = useReviewDiff(sessionId, selectedCommit);
+	const { diff, isLoading: diffLoading, refreshDiff, uncommittedFiles } = useReviewDiff(sessionId, selectedCommit);
 	const { commits } = useReviewCommits(sessionId);
 	const { branches } = useReviewBranches(sessionId);
-	const { viewedCount, toggleViewed, isViewed } = useViewedFiles(sessionId);
 
 	const [paused, setPaused] = useState(false);
 	const [viewType, setViewType] = useState<ViewType>("split");
@@ -39,6 +39,8 @@ export default function ReviewPage() {
 		await refreshDiff();
 		setIsRefreshing(false);
 	}, [refreshDiff]);
+
+	useAutoRefreshDiff(sessionId, refreshDiff);
 
 	const handleCommentResolved = useCallback(() => {
 		refreshReview();
@@ -58,6 +60,10 @@ export default function ReviewPage() {
 			return [];
 		}
 	}, [diff]);
+
+	const { viewedCount, toggleViewed, isViewed } = useViewedFiles(sessionId, files);
+
+	const uncommittedSet = useMemo(() => new Set(uncommittedFiles), [uncommittedFiles]);
 
 	const commentCounts = useMemo(() => {
 		const counts: Record<string, number> = {};
@@ -132,6 +138,17 @@ export default function ReviewPage() {
 		setSelectedFile(null);
 	}, []);
 
+	const handleOpenInEditor = useCallback((filePath: string) => {
+		const cwd = review?.workingDirectory;
+		if (!cwd) return;
+		const fullPath = `${cwd}/${filePath}`;
+		fetch("/api/actions/open", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ action: "editor", path: fullPath }),
+		}).catch(() => {});
+	}, [review?.workingDirectory]);
+
 	if (!review && !diffLoading) {
 		return (
 			<div className="h-screen flex items-center justify-center text-zinc-500">
@@ -175,6 +192,7 @@ export default function ReviewPage() {
 							onToggleViewed={toggleViewed}
 							viewedCount={viewedCount}
 							totalFiles={files.length}
+							uncommittedFiles={uncommittedSet}
 						/>
 					</div>
 				) : (
@@ -212,6 +230,7 @@ export default function ReviewPage() {
 						isViewed={isViewed}
 						onToggleViewed={toggleViewed}
 						sessionId={sessionId}
+						onOpenInEditor={handleOpenInEditor}
 					/>
 				)}
 			</div>
