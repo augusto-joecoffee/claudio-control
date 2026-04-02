@@ -11,7 +11,7 @@ export function useReview(sessionId: string) {
 	const { data, error, isLoading, mutate } = useSWR<ReviewSession>(
 		sessionId ? `/api/review/${encodeURIComponent(sessionId)}` : null,
 		fetcher,
-		{ revalidateOnFocus: false },
+		{ revalidateOnFocus: false, dedupingInterval: 2000 },
 	);
 
 	const addComment = async (filePath: string, line: number, content: string, anchorSnippet: string) => {
@@ -22,7 +22,16 @@ export function useReview(sessionId: string) {
 		});
 		if (!res.ok) throw new Error("Failed to add comment");
 		const { comment } = (await res.json()) as { comment: ReviewComment };
-		await mutate();
+
+		// Optimistic update — append the new comment locally instead of full refetch
+		await mutate(
+			(current) => {
+				if (!current) return current;
+				return { ...current, comments: [...current.comments, comment] };
+			},
+			{ revalidate: false },
+		);
+
 		return comment;
 	};
 

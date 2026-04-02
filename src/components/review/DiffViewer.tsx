@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { Diff, Hunk, Decoration, parseDiff, getChangeKey } from "react-diff-view";
 import type { FileData, ChangeData, HunkData } from "react-diff-view";
 import type { GutterOptions, ViewType } from "react-diff-view";
@@ -21,6 +21,22 @@ interface DiffViewerProps {
 
 function getFilePath(file: FileData): string {
 	return file.newPath === "/dev/null" ? file.oldPath : file.newPath;
+}
+
+/** Parse a unified diff and deduplicate entries that share the same file path. */
+function parseDiffDeduped(raw: string): FileData[] {
+	const parsed = parseDiff(raw, { nearbySequences: "zip" });
+	const byPath = new Map<string, FileData>();
+	for (const file of parsed) {
+		const path = getFilePath(file);
+		const existing = byPath.get(path);
+		if (existing) {
+			existing.hunks = [...existing.hunks, ...file.hunks];
+		} else {
+			byPath.set(path, { ...file });
+		}
+	}
+	return Array.from(byPath.values());
 }
 
 /** Extract ~3 lines of context around a change for comment anchoring. */
@@ -47,7 +63,7 @@ function findChangeIndexByNewLine(hunks: HunkData[], line: number): { hunk: Hunk
 	return null;
 }
 
-function FileDiff({
+const FileDiff = memo(function FileDiff({
 	file,
 	viewType,
 	comments,
@@ -65,7 +81,7 @@ function FileDiff({
 	onCancelComment: () => void;
 }) {
 	const filePath = getFilePath(file);
-	const fileComments = comments.filter((c) => c.filePath === filePath);
+	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath), [comments, filePath]);
 	const fileRef = useRef<HTMLDivElement>(null);
 
 	// Build widgets map: changeKey → ReactNode for inline comments
@@ -135,7 +151,6 @@ function FileDiff({
 
 	const renderGutter = useCallback(
 		({ change, side, renderDefault }: GutterOptions) => {
-			// Only make the new-side gutter clickable
 			if (side === "new" || (viewType === "unified" && change.type !== "delete")) {
 				return (
 					<span className="cursor-pointer hover:bg-violet-500/20 rounded px-0.5" title="Add comment">
@@ -147,6 +162,8 @@ function FileDiff({
 		},
 		[viewType],
 	);
+
+	const gutterEvents = useMemo(() => ({ onClick: handleGutterClick }), [handleGutterClick]);
 
 	return (
 		<div ref={fileRef} id={`file-${filePath}`} className="mb-4">
@@ -171,7 +188,7 @@ function FileDiff({
 						hunks={file.hunks}
 						widgets={widgets}
 						renderGutter={renderGutter}
-						gutterEvents={{ onClick: handleGutterClick }}
+						gutterEvents={gutterEvents}
 					>
 						{(hunks: HunkData[]) =>
 							hunks.flatMap((hunk) => [
@@ -190,9 +207,9 @@ function FileDiff({
 			</div>
 		</div>
 	);
-}
+});
 
-export function DiffViewer({
+export const DiffViewer = memo(function DiffViewer({
 	rawDiff,
 	viewType,
 	comments,
@@ -205,7 +222,7 @@ export function DiffViewer({
 	const files = useMemo(() => {
 		if (!rawDiff) return [];
 		try {
-			return parseDiff(rawDiff, { nearbySequences: "zip" });
+			return parseDiffDeduped(rawDiff);
 		} catch (e) {
 			console.error("Failed to parse diff:", e);
 			return [];
@@ -241,7 +258,7 @@ export function DiffViewer({
 			))}
 		</div>
 	);
-}
+});
 
-/** Re-export parseDiff and getFilePath for the page to build the file list. */
-export { parseDiff, getFilePath };
+/** Re-export for the page to build the file list. */
+export { parseDiffDeduped as parseDiff, getFilePath };

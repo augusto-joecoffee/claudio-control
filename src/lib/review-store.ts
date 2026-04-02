@@ -18,6 +18,13 @@ const EMPTY_REVIEW: ReviewSession = {
 
 const cache = new Map<string, { data: ReviewSession; mtime: number }>();
 
+let dirInitialized = false;
+async function ensureDir() {
+	if (dirInitialized) return;
+	await mkdir(REVIEW_DIR, { recursive: true });
+	dirInitialized = true;
+}
+
 function reviewPath(sessionId: string): string {
 	return join(REVIEW_DIR, `${sessionId}.json`);
 }
@@ -39,11 +46,11 @@ export async function loadReview(sessionId: string): Promise<ReviewSession | nul
 }
 
 export async function saveReview(sessionId: string, review: ReviewSession): Promise<void> {
-	await mkdir(REVIEW_DIR, { recursive: true });
+	await ensureDir();
 	const file = reviewPath(sessionId);
-	await writeFile(file, JSON.stringify(review, null, 2));
-	const s = await stat(file);
-	cache.set(sessionId, { data: review, mtime: s.mtimeMs });
+	await writeFile(file, JSON.stringify(review));
+	// Update cache directly — we just wrote this data, no need for an extra stat()
+	cache.set(sessionId, { data: review, mtime: Date.now() });
 }
 
 export async function deleteReview(sessionId: string): Promise<void> {

@@ -10,7 +10,7 @@ export function useReviewDiff(sessionId: string) {
 	const { data, error, isLoading, mutate } = useSWR<{ diff: string; diffStat: string }>(
 		sessionId ? `/api/review/${encodeURIComponent(sessionId)}/diff` : null,
 		fetcher,
-		{ revalidateOnFocus: false },
+		{ revalidateOnFocus: false, dedupingInterval: 3000 },
 	);
 
 	return {

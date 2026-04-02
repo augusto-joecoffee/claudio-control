@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import type { ReviewComment, ReviewCommentStatus } from "@/lib/types";
 
 interface CommentInputProps {
@@ -70,7 +70,7 @@ interface CommentDisplayProps {
 	comment: ReviewComment;
 }
 
-function CommentDisplay({ comment }: CommentDisplayProps) {
+const CommentDisplay = memo(function CommentDisplay({ comment }: CommentDisplayProps) {
 	const { label, color, bg } = statusConfig[comment.status];
 
 	return (
@@ -95,7 +95,7 @@ function CommentDisplay({ comment }: CommentDisplayProps) {
 			)}
 		</div>
 	);
-}
+});
 
 interface CommentThreadProps {
 	comments: ReviewComment[];
@@ -104,7 +104,7 @@ interface CommentThreadProps {
 	onCancelComment: () => void;
 }
 
-export function CommentThread({ comments, isAddingComment, onSubmitComment, onCancelComment }: CommentThreadProps) {
+export const CommentThread = memo(function CommentThread({ comments, isAddingComment, onSubmitComment, onCancelComment }: CommentThreadProps) {
 	return (
 		<div className="py-0.5">
 			{comments.map((comment) => (
@@ -113,4 +113,4 @@ export function CommentThread({ comments, isAddingComment, onSubmitComment, onCa
 			{isAddingComment && <CommentInput onSubmit={onSubmitComment} onCancel={onCancelComment} />}
 		</div>
 	);
-}
+});

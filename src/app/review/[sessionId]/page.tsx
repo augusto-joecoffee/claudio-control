@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import type { ViewType } from "react-diff-view";
 import { useReview } from "@/hooks/useReview";
 import { useReviewDiff } from "@/hooks/useReviewDiff";
@@ -24,25 +24,33 @@ export default function ReviewPage() {
 	const [activeComment, setActiveComment] = useState<{ filePath: string; line: number } | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
 
+	const pendingSnippetRef = useRef("");
+
+	const handleRefreshDiff = useCallback(async () => {
+		setIsRefreshing(true);
+		await refreshDiff();
+		setIsRefreshing(false);
+	}, [refreshDiff]);
+
+	const handleCommentResolved = useCallback(() => {
+		refreshReview();
+		handleRefreshDiff();
+	}, [refreshReview, handleRefreshDiff]);
+
 	const { processingId, pendingCount, completedCount, sessionStatus } = useReviewQueue(sessionId, {
 		paused,
-		onCommentResolved: useCallback(() => {
-			// Refresh both comments and diff when a comment is resolved
-			refreshReview();
-			handleRefreshDiff();
-		}, [refreshReview]),
+		onCommentResolved: handleCommentResolved,
 	});
 
 	const files = useMemo(() => {
 		if (!diff) return [];
 		try {
-			return parseDiff(diff, { nearbySequences: "zip" });
+			return parseDiff(diff);
 		} catch {
 			return [];
 		}
 	}, [diff]);
 
-	// Comment counts per file for the file tree
 	const commentCounts = useMemo(() => {
 		const counts: Record<string, number> = {};
 		for (const c of comments) {
@@ -53,16 +61,11 @@ export default function ReviewPage() {
 
 	const handleGutterClick = useCallback((filePath: string, line: number, anchorSnippet: string) => {
 		setActiveComment((prev) => {
-			// Toggle off if clicking the same line
 			if (prev?.filePath === filePath && prev?.line === line) return null;
 			return { filePath, line };
 		});
-		// Store snippet for use in submit
 		pendingSnippetRef.current = anchorSnippet;
 	}, []);
-
-	// Using a ref because anchorSnippet is captured at gutter-click time
-	const pendingSnippetRef = { current: "" };
 
 	const handleSubmitComment = useCallback(
 		async (content: string) => {
@@ -78,11 +81,13 @@ export default function ReviewPage() {
 		setActiveComment(null);
 	}, []);
 
-	const handleRefreshDiff = useCallback(async () => {
-		setIsRefreshing(true);
-		await refreshDiff();
-		setIsRefreshing(false);
-	}, [refreshDiff]);
+	const handleToggleView = useCallback(() => {
+		setViewType((v) => (v === "split" ? "unified" : "split"));
+	}, []);
+
+	const handleTogglePause = useCallback(() => {
+		setPaused((p) => !p);
+	}, []);
 
 	if (!review && !diffLoading) {
 		return (
@@ -102,7 +107,7 @@ export default function ReviewPage() {
 				sessionName={review?.workingDirectory.split("/").pop() ?? sessionId}
 				baseBranch={review?.baseBranch ?? "main"}
 				viewType={viewType}
-				onToggleView={() => setViewType((v) => (v === "split" ? "unified" : "split"))}
+				onToggleView={handleToggleView}
 				onRefreshDiff={handleRefreshDiff}
 				isRefreshing={isRefreshing}
 			/>
@@ -148,7 +153,7 @@ export default function ReviewPage() {
 				completedCount={completedCount}
 				sessionStatus={sessionStatus}
 				paused={paused}
-				onTogglePause={() => setPaused((p) => !p)}
+				onTogglePause={handleTogglePause}
 			/>
 		</div>
 	);

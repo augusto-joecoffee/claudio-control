@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import type { FileData } from "react-diff-view";
 
 interface FileTreeProps {
@@ -36,7 +37,7 @@ function countChanges(file: FileData): { additions: number; deletions: number } 
 	return { additions, deletions };
 }
 
-export function FileTree({ files, selectedFile, commentCounts, onSelectFile }: FileTreeProps) {
+export const FileTree = memo(function FileTree({ files, selectedFile, commentCounts, onSelectFile }: FileTreeProps) {
 	return (
 		<div className="flex flex-col h-full">
 			<div className="px-3 py-2 border-b border-zinc-800/50">
@@ -79,4 +80,4 @@ export function FileTree({ files, selectedFile, commentCounts, onSelectFile }: F
 			</div>
 		</div>
 	);
-}
+});

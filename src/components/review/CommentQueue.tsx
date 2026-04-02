@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 interface CommentQueueProps {
 	pendingCount: number;
 	processingId: string | null;
@@ -9,7 +11,7 @@ interface CommentQueueProps {
 	onTogglePause: () => void;
 }
 
-export function CommentQueue({
+export const CommentQueue = memo(function CommentQueue({
 	pendingCount,
 	processingId,
 	completedCount,
@@ -26,6 +28,8 @@ export function CommentQueue({
 			</div>
 		);
 	}
+
+	const progressPct = `${(completedCount / total) * 100}%`;
 
 	return (
 		<div className="px-4 py-2 border-t border-zinc-800/50 bg-[#0a0a0f]/80 flex items-center gap-4 text-xs">
@@ -54,12 +58,11 @@ export function CommentQueue({
 				<span className="text-amber-400 text-[10px]">Session {sessionStatus}...</span>
 			)}
 
-			{/* Progress bar */}
 			{total > 0 && (
 				<div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
 					<div
 						className="h-full bg-emerald-500 transition-all duration-300"
-						style={{ width: `${(completedCount / total) * 100}%` }}
+						style={{ width: progressPct }}
 					/>
 				</div>
 			)}
@@ -76,4 +79,4 @@ export function CommentQueue({
 			</button>
 		</div>
 	);
-}
+});

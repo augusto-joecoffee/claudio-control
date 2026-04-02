@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 interface ReviewToolbarProps {
 	sessionName: string;
 	baseBranch: string;
@@ -9,7 +11,7 @@ interface ReviewToolbarProps {
 	isRefreshing: boolean;
 }
 
-export function ReviewToolbar({
+export const ReviewToolbar = memo(function ReviewToolbar({
 	sessionName,
 	baseBranch,
 	viewType,
@@ -59,4 +61,4 @@ export function ReviewToolbar({
 			</button>
 		</div>
 	);
-}
+});

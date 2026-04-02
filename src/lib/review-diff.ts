@@ -9,7 +9,7 @@ async function gitCommand(args: string[], cwd: string): Promise<string> {
 		const { stdout } = await execFileAsync("git", args, {
 			cwd,
 			timeout: GIT_TIMEOUT_MS,
-			maxBuffer: 10 * 1024 * 1024, // 10MB for large diffs
+			maxBuffer: 10 * 1024 * 1024,
 		});
 		return stdout.trim();
 	} catch {
@@ -21,19 +21,23 @@ export async function getMergeBase(cwd: string, baseBranch: string): Promise<str
 	return gitCommand(["merge-base", "HEAD", baseBranch], cwd);
 }
 
+let defaultBranchCache: Map<string, string> | undefined;
+
 export async function getDefaultBranch(cwd: string): Promise<string> {
-	// Try symbolic-ref first (remote HEAD)
+	if (!defaultBranchCache) defaultBranchCache = new Map();
+	const cached = defaultBranchCache.get(cwd);
+	if (cached) return cached;
+
 	const remoteHead = await gitCommand(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd);
 	if (remoteHead) {
-		// Returns e.g. "refs/remotes/origin/main"
-		const parts = remoteHead.split("/");
-		return parts[parts.length - 1];
+		const branch = remoteHead.split("/").pop()!;
+		defaultBranchCache.set(cwd, branch);
+		return branch;
 	}
-	// Fallback: check if "main" or "master" exists
 	const mainExists = await gitCommand(["rev-parse", "--verify", "main"], cwd);
-	if (mainExists) return "main";
+	if (mainExists) { defaultBranchCache.set(cwd, "main"); return "main"; }
 	const masterExists = await gitCommand(["rev-parse", "--verify", "master"], cwd);
-	if (masterExists) return "master";
+	if (masterExists) { defaultBranchCache.set(cwd, "master"); return "master"; }
 	return "main";
 }
 
@@ -42,35 +46,32 @@ export async function getDefaultBranch(cwd: string): Promise<string> {
  * Returns raw unified diff text for react-diff-view's parseDiff().
  */
 export async function getFullDiff(cwd: string, mergeBase: string): Promise<string> {
-	// Committed changes since merge-base
-	const committedDiff = await gitCommand(["diff", `${mergeBase}..HEAD`, "--unified=5"], cwd);
+	// Run all independent git commands in parallel
+	const [committedDiff, workingDiff, untrackedRaw] = await Promise.all([
+		gitCommand(["diff", `${mergeBase}..HEAD`, "--unified=5"], cwd),
+		gitCommand(["diff", "HEAD", "--unified=5"], cwd),
+		gitCommand(["ls-files", "--others", "--exclude-standard"], cwd),
+	]);
 
-	// Uncommitted changes (staged + unstaged)
-	const workingDiff = await gitCommand(["diff", "HEAD", "--unified=5"], cwd);
-
-	// For untracked new files, generate diff manually
-	const untrackedRaw = await gitCommand(["ls-files", "--others", "--exclude-standard"], cwd);
 	const untrackedFiles = untrackedRaw.split("\n").filter(Boolean);
 
-	const untrackedDiffs: string[] = [];
-	for (const file of untrackedFiles) {
-		const content = await gitCommand(["hash-object", "--stdin", "--path", file], cwd);
-		if (content) {
-			// Read the file content to generate a proper diff
+	// Batch all untracked file diffs in parallel instead of sequential
+	const untrackedDiffs = await Promise.all(
+		untrackedFiles.map(async (file) => {
 			try {
 				const { stdout } = await execFileAsync("git", ["diff", "--no-index", "/dev/null", file], {
 					cwd,
 					timeout: GIT_TIMEOUT_MS,
 					maxBuffer: 10 * 1024 * 1024,
 				});
-				if (stdout) untrackedDiffs.push(stdout.trim());
+				return stdout.trim();
 			} catch (e: unknown) {
 				// git diff --no-index exits with code 1 when files differ (which they always will)
 				const err = e as { stdout?: string };
-				if (err.stdout) untrackedDiffs.push(err.stdout.trim());
+				return err.stdout?.trim() ?? "";
 			}
-		}
-	}
+		}),
+	);
 
 	const parts = [committedDiff, workingDiff, ...untrackedDiffs].filter(Boolean);
 	return parts.join("\n");
@@ -80,8 +81,10 @@ export async function getFullDiff(cwd: string, mergeBase: string): Promise<strin
  * Get a compact stat summary for the file tree sidebar.
  */
 export async function getDiffStat(cwd: string, mergeBase: string): Promise<string> {
-	const committedStat = await gitCommand(["diff", `${mergeBase}..HEAD`, "--stat"], cwd);
-	const workingStat = await gitCommand(["diff", "HEAD", "--stat"], cwd);
+	const [committedStat, workingStat] = await Promise.all([
+		gitCommand(["diff", `${mergeBase}..HEAD`, "--stat"], cwd),
+		gitCommand(["diff", "HEAD", "--stat"], cwd),
+	]);
 	const parts = [committedStat, workingStat].filter(Boolean);
 	return parts.join("\n");
 }

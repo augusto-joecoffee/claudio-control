@@ -15,14 +15,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 		return NextResponse.json({ error: "Review not found" }, { status: 404 });
 	}
 
+	// Single pass over comments to gather all counts
+	let processing: typeof review.comments[number] | null = null;
+	let pendingCount = 0;
+	let completedCount = 0;
+	for (const c of review.comments) {
+		if (c.status === "processing" || c.status === "sending") processing = c;
+		else if (c.status === "pending") pendingCount++;
+		else if (c.status === "resolved") completedCount++;
+	}
+
 	// Check the Claude session status
 	const sessions = await discoverSessions();
 	const session = sessions.find((s) => s.id === sessionId);
 	const sessionStatus = session?.status ?? "finished";
-
-	const processing = review.comments.find((c) => c.status === "processing" || c.status === "sending");
-	const pendingCount = review.comments.filter((c) => c.status === "pending").length;
-	const completedCount = review.comments.filter((c) => c.status === "resolved").length;
 
 	// If session went idle and there's a processing comment, mark it resolved
 	if (processing && (sessionStatus === "idle" || sessionStatus === "waiting") && processing.status === "processing") {
@@ -59,8 +65,19 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 		return NextResponse.json({ error: "Review not found" }, { status: 404 });
 	}
 
-	// Don't send if there's already a comment being processed
-	const alreadyProcessing = review.comments.find((c) => c.status === "processing" || c.status === "sending");
+	// Single pass: find processing and next pending
+	let alreadyProcessing: typeof review.comments[number] | null = null;
+	let nextPending: typeof review.comments[number] | null = null;
+	for (const c of review.comments) {
+		if (c.status === "processing" || c.status === "sending") {
+			alreadyProcessing = c;
+			break;
+		}
+		if (c.status === "pending" && !nextPending) {
+			nextPending = c;
+		}
+	}
+
 	if (alreadyProcessing) {
 		return NextResponse.json({ sent: false, reason: "already-processing", commentId: alreadyProcessing.id });
 	}
@@ -72,21 +89,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 		return NextResponse.json({ sent: false, reason: "session-not-found" });
 	}
 
-	// Session must be idle to accept a comment
 	if (session.status !== "idle" && session.status !== "waiting") {
 		return NextResponse.json({ sent: false, reason: "session-busy", sessionStatus: session.status });
 	}
 
-	// Find next pending comment
-	const nextComment = review.comments.find((c) => c.status === "pending");
-	if (!nextComment) {
+	if (!nextPending) {
 		return NextResponse.json({ sent: false, reason: "no-pending-comments" });
 	}
 
-	// Format the comment as a prompt for Claude
-	const prompt = formatReviewPrompt(nextComment.filePath, nextComment.line, nextComment.anchorSnippet, nextComment.content);
+	const prompt = formatReviewPrompt(nextPending.filePath, nextPending.line, nextPending.anchorSnippet, nextPending.content);
 
-	// Send via the existing send-message mechanism
 	try {
 		const res = await fetch(`http://localhost:3200/api/actions/open`, {
 			method: "POST",
@@ -103,11 +115,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 			return NextResponse.json({ sent: false, reason: "send-failed" });
 		}
 
-		nextComment.status = "processing";
-		review.queueHead = review.comments.indexOf(nextComment) + 1;
+		nextPending.status = "processing";
+		review.queueHead = review.comments.indexOf(nextPending) + 1;
 		await saveReview(sessionId, review);
 
-		return NextResponse.json({ sent: true, commentId: nextComment.id });
+		return NextResponse.json({ sent: true, commentId: nextPending.id });
 	} catch (err) {
 		console.error("Failed to send review comment:", err);
 		return NextResponse.json({ sent: false, reason: "send-error" });
