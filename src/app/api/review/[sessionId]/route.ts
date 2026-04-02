@@ -48,3 +48,26 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 	await saveReview(sessionId, review);
 	return NextResponse.json(review);
 }
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
+	const { sessionId } = await params;
+	const review = await loadReview(sessionId);
+	if (!review) {
+		return NextResponse.json({ error: "Review not found" }, { status: 404 });
+	}
+
+	const { baseBranch } = (await request.json()) as { baseBranch: string };
+	if (!baseBranch) {
+		return NextResponse.json({ error: "Missing baseBranch" }, { status: 400 });
+	}
+
+	const mergeBase = await getMergeBase(review.workingDirectory, baseBranch);
+	if (!mergeBase) {
+		return NextResponse.json({ error: `No common ancestor found between HEAD and ${baseBranch}` }, { status: 400 });
+	}
+
+	review.baseBranch = baseBranch;
+	review.mergeBase = mergeBase;
+	await saveReview(sessionId, review);
+	return NextResponse.json(review);
+}

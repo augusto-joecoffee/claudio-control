@@ -111,7 +111,7 @@ interface CommentDisplayProps {
 
 const CommentDisplay = memo(function CommentDisplay({ comment, onResolve, onDelete }: CommentDisplayProps) {
 	const { label, color, bg } = statusConfig[comment.status];
-	const [minimized, setMinimized] = useState(false);
+	const [minimized, setMinimized] = useState(comment.status === "resolved");
 
 	return (
 		<div className={`mx-2 my-1.5 rounded-lg border overflow-hidden ${
@@ -144,7 +144,7 @@ const CommentDisplay = memo(function CommentDisplay({ comment, onResolve, onDele
 					{/* Resolve */}
 					{comment.status !== "resolved" && comment.status !== "pending" && comment.status !== "processing" && onResolve && (
 						<button
-							onClick={() => onResolve(comment.id)}
+							onClick={() => { onResolve(comment.id); setMinimized(true); }}
 							className="text-zinc-600 hover:text-emerald-400 transition-colors p-0.5"
 							title="Resolve"
 						>

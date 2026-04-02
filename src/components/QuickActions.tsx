@@ -94,14 +94,14 @@ export function QuickActions({
 
   useEffect(() => {
     if (!sessionId) return;
-    const api = (window as unknown as { electronAPI?: { isReviewOpen: (id: string) => Promise<boolean> } }).electronAPI;
+    const api = (window as unknown as { electronAPI?: { isReviewOpen: (id: string) => Promise<{ open: boolean }> } }).electronAPI;
     if (!api?.isReviewOpen) return;
     let cancelled = false;
     const check = () => {
-      api.isReviewOpen(sessionId).then((open) => { if (!cancelled) setReviewOpen(open); });
+      api.isReviewOpen(sessionId).then((result) => { if (!cancelled) setReviewOpen(result.open); });
     };
     check();
-    const interval = setInterval(check, 2000);
+    const interval = setInterval(check, 1000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [sessionId]);
 

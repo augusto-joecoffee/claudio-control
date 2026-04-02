@@ -518,22 +518,57 @@ ipcMain.handle("pty:listInlineTmux", async () => {
 
 // ── Code Review Window ──
 
+// Returns { open } for the given session, so the UI can highlight the button
 ipcMain.handle("review:isOpen", (_event, { sessionId }) => {
-  if (!reviewWindows.has(sessionId)) return false;
+  if (!reviewWindows.has(sessionId)) return { open: false };
   const win = reviewWindows.get(sessionId);
-  return win && !win.isDestroyed();
+  if (!win || win.isDestroyed()) return { open: false };
+  return { open: true };
 });
 
+// Capture window state in memory (not async disk) so the next window can use it immediately.
+function captureWindowState(win) {
+  if (!win || win.isDestroyed()) return null;
+  const isMaximized = win.isMaximized();
+  const isFullScreen = win.isFullScreen();
+  const bounds = win.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const normalBounds = win.getNormalBounds();
+  return {
+    x: normalBounds.x, y: normalBounds.y,
+    width: normalBounds.width, height: normalBounds.height,
+    isMaximized, isFullScreen,
+    displayId: display.id, displayBounds: display.bounds,
+  };
+}
+
 ipcMain.handle("review:openWindow", (_event, { sessionId, sessionName }) => {
+  // If this session's review is already open, toggle it closed
   if (reviewWindows.has(sessionId)) {
     const existing = reviewWindows.get(sessionId);
     if (!existing.isDestroyed()) {
-      existing.focus();
-      return;
+      saveWindowState(existing, "review");
+      existing.close();
     }
     reviewWindows.delete(sessionId);
+    return;
   }
 
+  // If another review window is open, reuse it — just navigate to the new URL.
+  // This keeps the window fullscreen/maximized without any macOS Space transition issues.
+  for (const [id, win] of reviewWindows) {
+    if (!win.isDestroyed()) {
+      win.loadURL(`http://localhost:${PORT}/review/${encodeURIComponent(sessionId)}`);
+      win.setTitle(`Review: ${sessionName || sessionId}`);
+      reviewWindows.delete(id);
+      reviewWindows.set(sessionId, win);
+      win.focus();
+      return;
+    }
+    reviewWindows.delete(id);
+  }
+
+  // No existing window — create a new one
   const savedState = loadWindowState("review");
 
   let windowOpts = { width: 1200, height: 900 };

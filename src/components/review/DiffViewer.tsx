@@ -176,7 +176,7 @@ const FileDiff = memo(function FileDiff({
 	return (
 		<div ref={fileRef} id={`file-${filePath}`} className="mb-4">
 			{/* File header */}
-			<div className="sticky top-0 z-10 px-3 py-1.5 bg-zinc-900/95 border border-zinc-800/50 rounded-t-lg flex items-center gap-2 backdrop-blur-sm">
+			<div className="sticky top-0 z-20 px-3 py-1.5 bg-[#0a0a0f] border border-zinc-800/50 rounded-t-lg flex items-center gap-2">
 				<span
 					className={`text-[10px] font-bold ${
 						file.type === "add" ? "text-emerald-400" : file.type === "delete" ? "text-red-400" : "text-amber-400"
@@ -184,11 +184,15 @@ const FileDiff = memo(function FileDiff({
 				>
 					{file.type === "add" ? "NEW" : file.type === "delete" ? "DEL" : "MOD"}
 				</span>
-				<span className="text-xs text-zinc-300 font-mono">{filePath}</span>
+				<span
+					className="text-xs text-zinc-300 font-mono cursor-pointer hover:text-zinc-100 transition-colors"
+					onClick={() => navigator.clipboard.writeText(filePath)}
+					title="Click to copy path"
+				>{filePath}</span>
 			</div>
 
 			{/* Diff content */}
-			<div className="border border-t-0 border-zinc-800/50 rounded-b-lg overflow-hidden diff-viewer-container">
+			<div className="border border-t-0 border-zinc-800/50 rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }}>
 				{file.hunks.length > 0 ? (
 					<Diff
 						viewType={viewType}

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 interface CommitInfo {
 	hash: string;
@@ -11,6 +11,8 @@ interface CommitInfo {
 interface ReviewToolbarProps {
 	sessionName: string;
 	baseBranch: string;
+	branches: string[];
+	onChangeBaseBranch: (branch: string) => void;
 	viewType: "split" | "unified";
 	onToggleView: () => void;
 	onRefreshDiff: () => void;
@@ -23,9 +25,102 @@ interface ReviewToolbarProps {
 const btnClass =
 	"h-8 px-3 text-xs rounded-md border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors";
 
+function BranchPicker({ value, branches, onChange }: { value: string; branches: string[]; onChange: (b: string) => void }) {
+	const [open, setOpen] = useState(false);
+	const [query, setQuery] = useState("");
+	const inputRef = useRef<HTMLInputElement>(null);
+	const containerRef = useRef<HTMLDivElement>(null);
+
+	const filtered = query
+		? branches
+			.filter((b) => b.toLowerCase().includes(query.toLowerCase()))
+			.sort((a, b) => {
+				const al = a.toLowerCase(), bl = b.toLowerCase(), q = query.toLowerCase();
+				const aStarts = al.startsWith(q) ? 0 : 1;
+				const bStarts = bl.startsWith(q) ? 0 : 1;
+				if (aStarts !== bStarts) return aStarts - bStarts;
+				const aExact = al === q ? 0 : 1;
+				const bExact = bl === q ? 0 : 1;
+				if (aExact !== bExact) return aExact - bExact;
+				return a.length - b.length || a.localeCompare(b);
+			})
+		: branches;
+
+	const select = useCallback((b: string) => {
+		onChange(b);
+		setOpen(false);
+		setQuery("");
+	}, [onChange]);
+
+	useEffect(() => {
+		if (!open) return;
+		const handler = (e: MouseEvent) => {
+			if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+				setOpen(false);
+				setQuery("");
+			}
+		};
+		document.addEventListener("mousedown", handler);
+		return () => document.removeEventListener("mousedown", handler);
+	}, [open]);
+
+	useEffect(() => {
+		if (open) inputRef.current?.focus();
+	}, [open]);
+
+	return (
+		<div ref={containerRef} className="relative">
+			<button
+				onClick={() => setOpen((o) => !o)}
+				className="h-8 px-2 text-[11px] rounded-md border border-zinc-700 bg-zinc-900 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 transition-colors flex items-center gap-1.5 max-w-[140px]"
+			>
+				<svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+					<path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+				</svg>
+				<span className="truncate">{value}</span>
+			</button>
+			{open && (
+				<div className="absolute top-full left-0 mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-50">
+					<div className="p-1.5">
+						<input
+							ref={inputRef}
+							value={query}
+							onChange={(e) => setQuery(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" && filtered.length > 0) select(filtered[0]);
+								if (e.key === "Escape") { setOpen(false); setQuery(""); }
+							}}
+							placeholder="Search branches..."
+							className="w-full px-2 py-1.5 text-xs bg-zinc-800 text-zinc-200 rounded border border-zinc-700 outline-none placeholder-zinc-600"
+						/>
+					</div>
+					<div className="max-h-48 overflow-y-auto">
+						{filtered.map((b) => (
+							<button
+								key={b}
+								onClick={() => select(b)}
+								className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-800 transition-colors ${
+									b === value ? "text-violet-400" : "text-zinc-400"
+								}`}
+							>
+								{b}
+							</button>
+						))}
+						{filtered.length === 0 && (
+							<div className="px-3 py-2 text-xs text-zinc-600">No matching branches</div>
+						)}
+					</div>
+				</div>
+			)}
+		</div>
+	);
+}
+
 export const ReviewToolbar = memo(function ReviewToolbar({
 	sessionName,
 	baseBranch,
+	branches,
+	onChangeBaseBranch,
 	viewType,
 	onToggleView,
 	onRefreshDiff,
@@ -47,9 +142,7 @@ export const ReviewToolbar = memo(function ReviewToolbar({
 				</span>
 			</div>
 
-			<span className="text-[10px] text-zinc-600 px-2 py-0.5 rounded bg-zinc-800/50 border border-zinc-700/50">
-				base: {baseBranch}
-			</span>
+			<BranchPicker value={baseBranch} branches={branches} onChange={onChangeBaseBranch} />
 
 			<select
 				value={selectedCommit}

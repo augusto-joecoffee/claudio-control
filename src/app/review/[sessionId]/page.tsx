@@ -7,6 +7,7 @@ import { useReview } from "@/hooks/useReview";
 import { useReviewDiff } from "@/hooks/useReviewDiff";
 import { useReviewQueue } from "@/hooks/useReviewQueue";
 import { useReviewCommits } from "@/hooks/useReviewCommits";
+import { useReviewBranches } from "@/hooks/useReviewBranches";
 import { DiffViewer, parseDiff, getFilePath } from "@/components/review/DiffViewer";
 import { FileTree } from "@/components/review/FileTree";
 import { CommentQueue } from "@/components/review/CommentQueue";
@@ -20,12 +21,14 @@ export default function ReviewPage() {
 	const [selectedCommit, setSelectedCommit] = useState("all");
 	const { diff, isLoading: diffLoading, refreshDiff } = useReviewDiff(sessionId, selectedCommit);
 	const { commits } = useReviewCommits(sessionId);
+	const { branches } = useReviewBranches(sessionId);
 
 	const [paused, setPaused] = useState(false);
 	const [viewType, setViewType] = useState<ViewType>("split");
 	const [selectedFile, setSelectedFile] = useState<string | null>(null);
 	const [activeComment, setActiveComment] = useState<{ filePath: string; line: number } | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
+	const [sidebarOpen, setSidebarOpen] = useState(true);
 
 	const pendingSnippetRef = useRef("");
 
@@ -100,6 +103,16 @@ export default function ReviewPage() {
 	const handleResolveComment = useCallback((id: string) => handleCommentAction(id, "resolve"), [handleCommentAction]);
 	const handleDeleteComment = useCallback((id: string) => handleCommentAction(id, "delete"), [handleCommentAction]);
 
+	const handleChangeBaseBranch = useCallback(async (branch: string) => {
+		await fetch(`/api/review/${encodeURIComponent(sessionId)}`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ baseBranch: branch }),
+		});
+		refreshReview();
+		refreshDiff();
+	}, [sessionId, refreshReview, refreshDiff]);
+
 	const [, startTransition] = useTransition();
 
 	const handleToggleView = useCallback(() => {
@@ -134,6 +147,8 @@ export default function ReviewPage() {
 			<ReviewToolbar
 				sessionName={review?.workingDirectory.split("/").pop() ?? sessionId}
 				baseBranch={review?.baseBranch ?? "main"}
+				branches={branches}
+				onChangeBaseBranch={handleChangeBaseBranch}
 				viewType={viewType}
 				onToggleView={handleToggleView}
 				onRefreshDiff={handleRefreshDiff}
@@ -146,14 +161,27 @@ export default function ReviewPage() {
 			{/* Main content */}
 			<div className="flex-1 flex min-h-0">
 				{/* File tree sidebar */}
-				<div className="w-[250px] border-r border-zinc-800/50 bg-[#0a0a0f]/50 overflow-hidden flex flex-col">
-					<FileTree
-						files={files}
-						selectedFile={selectedFile}
-						commentCounts={commentCounts}
-						onSelectFile={setSelectedFile}
-					/>
-				</div>
+				{sidebarOpen ? (
+					<div className="w-[250px] border-r border-zinc-800/50 bg-[#0a0a0f]/50 overflow-hidden flex flex-col shrink-0">
+						<FileTree
+							files={files}
+							selectedFile={selectedFile}
+							commentCounts={commentCounts}
+							onSelectFile={setSelectedFile}
+							onCollapse={() => setSidebarOpen(false)}
+						/>
+					</div>
+				) : (
+					<button
+						onClick={() => setSidebarOpen(true)}
+						className="w-6 flex items-start pt-2.5 justify-center border-r border-zinc-800/50 bg-[#0a0a0f]/30 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors shrink-0"
+						title="Show files"
+					>
+						<svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+							<path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+						</svg>
+					</button>
+				)}
 
 				{/* Diff viewer */}
 				{diffLoading ? (

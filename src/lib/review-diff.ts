@@ -21,6 +21,21 @@ export async function getMergeBase(cwd: string, baseBranch: string): Promise<str
 	return gitCommand(["merge-base", "HEAD", baseBranch], cwd);
 }
 
+export async function getBranches(cwd: string): Promise<string[]> {
+	const [local, remote] = await Promise.all([
+		gitCommand(["branch", "--format=%(refname:short)"], cwd),
+		gitCommand(["branch", "-r", "--format=%(refname:short)"], cwd),
+	]);
+	const branches = new Set<string>();
+	for (const b of local.split("\n").filter(Boolean)) branches.add(b);
+	for (const b of remote.split("\n").filter(Boolean)) {
+		// "origin/main" → "main"
+		const short = b.replace(/^[^/]+\//, "");
+		if (short !== "HEAD") branches.add(short);
+	}
+	return Array.from(branches).sort();
+}
+
 let defaultBranchCache: Map<string, string> | undefined;
 
 export async function getDefaultBranch(cwd: string): Promise<string> {
