@@ -41,9 +41,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 			try {
 				const lines = await readFullConversation(session.jsonlPath);
 				const conversation = linesToConversation(lines);
-				const promptSignature = `[Code Review Comment]\nFile: ${processing.filePath} (line ${processing.line})`;
+				// Match on file path and line — search for both with and without newline
+				// since tmux may alter whitespace when pasting
+				const fileSignature = `File: ${processing.filePath} (line ${processing.line})`;
 				const promptIdx = conversation.findLastIndex(
-					(m) => m.type === "user" && m.text?.includes(promptSignature),
+					(m) => m.type === "user" && m.text?.includes(fileSignature),
 				);
 				if (promptIdx >= 0) {
 					// Take the LAST assistant text — this matches what the terminal displays.
@@ -76,8 +78,22 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 			});
 		}
 
-		// No response found yet — session may have briefly gone idle between tool calls.
-		// Keep status as "processing" and retry on next poll.
+		// No response found yet. If the comment has been processing for over 2 minutes,
+		// force it to answered to unblock the queue.
+		const processingAge = Date.now() - new Date(processing.createdAt).getTime();
+		if (!response && processingAge > 120_000) {
+			processing.status = "answered";
+			processing.response = null;
+			await saveReview(sessionId, review);
+
+			return NextResponse.json({
+				processingId: null,
+				pendingCount,
+				completedCount: completedCount + 1,
+				sessionStatus,
+				justResolved: processing.id,
+			});
+		}
 	}
 
 	return NextResponse.json({
