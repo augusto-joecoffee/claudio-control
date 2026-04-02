@@ -15,6 +15,7 @@ interface CreateRequest {
   repoPath: string;
   branchName?: string;
   baseBranch?: string;
+  worktreePath?: string;
   prompt?: string;
   tmuxSession?: string;
 }
@@ -101,7 +102,7 @@ async function openTerminalWithClaude(
 export async function POST(request: Request) {
   try {
     const body: CreateRequest = await request.json();
-    const { repoPath, branchName, baseBranch, prompt, tmuxSession } = body;
+    const { repoPath, branchName, baseBranch, worktreePath, prompt, tmuxSession } = body;
 
     if (!repoPath) {
       return NextResponse.json({ error: "Missing repoPath" }, { status: 400 });
@@ -116,8 +117,16 @@ export async function POST(request: Request) {
 
     let targetPath = repoPath;
 
-    // If a branch name is provided, create a worktree
-    if (branchName) {
+    if (worktreePath) {
+      // Use an existing worktree directly
+      try {
+        await stat(worktreePath);
+        targetPath = worktreePath;
+      } catch {
+        return NextResponse.json({ error: "Worktree path does not exist" }, { status: 404 });
+      }
+    } else if (branchName) {
+      // Create a new worktree
       try {
         targetPath = await createWorktree(repoPath, branchName, baseBranch);
       } catch (error: unknown) {

@@ -124,3 +124,33 @@ export async function getMainWorktreePath(cwd: string): Promise<string | null> {
   worktreeCache.set(cwd, { result, ts: now });
   return result;
 }
+
+export interface WorktreeInfo {
+  path: string;
+  branch: string | null;
+  isMain: boolean;
+}
+
+export async function getAllWorktrees(cwd: string): Promise<WorktreeInfo[]> {
+  const output = await gitCommand(["worktree", "list", "--porcelain"], cwd);
+  if (!output) return [];
+
+  const worktrees: WorktreeInfo[] = [];
+  const blocks = output.split("\n\n");
+  let isFirst = true;
+
+  for (const block of blocks) {
+    const pathMatch = block.match(/^worktree (.+)$/m);
+    if (!pathMatch) continue;
+
+    const branchMatch = block.match(/^branch refs\/heads\/(.+)$/m);
+    worktrees.push({
+      path: pathMatch[1],
+      branch: branchMatch ? branchMatch[1] : null,
+      isMain: isFirst,
+    });
+    isFirst = false;
+  }
+
+  return worktrees;
+}
