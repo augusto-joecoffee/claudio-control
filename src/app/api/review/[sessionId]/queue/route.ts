@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadReview, saveReview } from "@/lib/review-store";
-import { discoverSessions } from "@/lib/discovery";
+import { discoverSessions, getSessionDetail } from "@/lib/discovery";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +30,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 	const session = sessions.find((s) => s.id === sessionId);
 	const sessionStatus = session?.status ?? "finished";
 
-	// If session went idle and there's a processing comment, mark it resolved
+	// If session went idle and there's a processing comment, mark it resolved and capture Claude's reply
 	if (processing && (sessionStatus === "idle" || sessionStatus === "waiting") && processing.status === "processing") {
 		processing.status = "resolved";
 		processing.resolvedAt = new Date().toISOString();
+		// Fetch the full last assistant message (preview is truncated to 200 chars)
+		const detail = await getSessionDetail(sessionId);
+		if (detail?.conversation.length) {
+			const lastAssistant = detail.conversation.findLast((m) => m.type === "assistant" && m.text);
+			processing.response = lastAssistant?.text ?? null;
+		}
 		await saveReview(sessionId, review);
 
 		return NextResponse.json({
@@ -132,6 +138,9 @@ function formatReviewPrompt(filePath: string, line: number, anchorSnippet: strin
 		prompt += `\n\nContext:\n\`\`\`\n${anchorSnippet}\n\`\`\``;
 	}
 	prompt += `\n\nComment: "${content}"`;
-	prompt += "\n\nPlease address this review comment by making the necessary code changes. After making changes, briefly explain what you did.";
+	prompt += `\n\nAddress this review comment. Your final text response will be shown inline in the code review UI, so:`;
+	prompt += `\n- If it's a question: answer it directly and concisely.`;
+	prompt += `\n- If it requires a code change: make the fix, then reply with the file path, line number, and a brief explanation of what you changed and why.`;
+	prompt += `\n- Keep your reply short (2-4 sentences max). No markdown headers or bullet lists.`;
 	return prompt;
 }

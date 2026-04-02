@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSettings } from "@/hooks/useSettings";
 
 const iconBtnClass =
@@ -89,6 +89,21 @@ export function QuickActions({
   const [reattaching, setReattaching] = useState(false);
 
   const { editorAvailable, gitGuiAvailable, inlineTerminal } = useSettings();
+
+  const [reviewOpen, setReviewOpen] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const api = (window as unknown as { electronAPI?: { isReviewOpen: (id: string) => Promise<boolean> } }).electronAPI;
+    if (!api?.isReviewOpen) return;
+    let cancelled = false;
+    const check = () => {
+      api.isReviewOpen(sessionId).then((open) => { if (!cancelled) setReviewOpen(open); });
+    };
+    check();
+    const interval = setInterval(check, 2000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [sessionId]);
 
   const openReview = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -275,7 +290,11 @@ export function QuickActions({
         </IconButton>
       ) : null}
       {hasChanges && sessionId && (
-        <IconButton onClick={openReview} tip="Review" className={`flex-1 flex items-center justify-center h-8 rounded-lg bg-white/4 hover:bg-violet-500/12 border border-white/7 hover:border-violet-500/25 text-zinc-500 hover:text-violet-400 transition-all duration-150`}>
+        <IconButton onClick={openReview} tip="Review" className={`flex-1 flex items-center justify-center h-8 rounded-lg border transition-all duration-150 ${
+          reviewOpen
+            ? "bg-violet-500/10 hover:bg-violet-500/22 border-violet-500/20 hover:border-violet-500/40 text-violet-400 hover:text-violet-300"
+            : "bg-white/4 hover:bg-violet-500/12 border-white/7 hover:border-violet-500/25 text-zinc-500 hover:text-violet-400"
+        }`}>
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />

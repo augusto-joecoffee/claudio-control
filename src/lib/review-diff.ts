@@ -78,6 +78,67 @@ export async function getFullDiff(cwd: string, mergeBase: string): Promise<strin
 }
 
 /**
+ * Get only committed changes (merge-base..HEAD) without working tree changes.
+ */
+export async function getCommittedDiff(cwd: string, mergeBase: string): Promise<string> {
+	// Diff against the remote tracking branch (unpushed commits only)
+	// Falls back to mergeBase if the branch has never been pushed
+	const upstream = await gitCommand(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+	const base = upstream || mergeBase;
+	return gitCommand(["diff", `${base}..HEAD`, "--unified=5"], cwd);
+}
+
+/**
+ * Get only uncommitted changes (staged + unstaged + untracked).
+ */
+export async function getUncommittedDiff(cwd: string): Promise<string> {
+	const [workingDiff, untrackedRaw] = await Promise.all([
+		gitCommand(["diff", "HEAD", "--unified=5"], cwd),
+		gitCommand(["ls-files", "--others", "--exclude-standard"], cwd),
+	]);
+
+	const untrackedFiles = untrackedRaw.split("\n").filter(Boolean);
+
+	const untrackedDiffs = await Promise.all(
+		untrackedFiles.map(async (file) => {
+			try {
+				const { stdout } = await execFileAsync("git", ["diff", "--no-index", "/dev/null", file], {
+					cwd,
+					timeout: GIT_TIMEOUT_MS,
+					maxBuffer: 10 * 1024 * 1024,
+				});
+				return stdout.trim();
+			} catch (e: unknown) {
+				const err = e as { stdout?: string };
+				return err.stdout?.trim() ?? "";
+			}
+		}),
+	);
+
+	const parts = [workingDiff, ...untrackedDiffs].filter(Boolean);
+	return parts.join("\n");
+}
+
+/**
+ * Get the diff for a single commit.
+ */
+export async function getCommitDiff(cwd: string, commitHash: string): Promise<string> {
+	return gitCommand(["diff", `${commitHash}~1..${commitHash}`, "--unified=5"], cwd);
+}
+
+/**
+ * List commits between merge-base and HEAD.
+ */
+export async function getCommits(cwd: string, mergeBase: string): Promise<{ hash: string; shortHash: string; subject: string }[]> {
+	const raw = await gitCommand(["log", `${mergeBase}..HEAD`, "--format=%H|%h|%s"], cwd);
+	if (!raw) return [];
+	return raw.split("\n").map((line) => {
+		const [hash, shortHash, ...rest] = line.split("|");
+		return { hash, shortHash, subject: rest.join("|") };
+	});
+}
+
+/**
  * Get a compact stat summary for the file tree sidebar.
  */
 export async function getDiffStat(cwd: string, mergeBase: string): Promise<string> {

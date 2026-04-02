@@ -507,6 +507,12 @@ ipcMain.handle("pty:listInlineTmux", async () => {
 
 // ── Code Review Window ──
 
+ipcMain.handle("review:isOpen", (_event, { sessionId }) => {
+  if (!reviewWindows.has(sessionId)) return false;
+  const win = reviewWindows.get(sessionId);
+  return win && !win.isDestroyed();
+});
+
 ipcMain.handle("review:openWindow", (_event, { sessionId, sessionName }) => {
   if (reviewWindows.has(sessionId)) {
     const existing = reviewWindows.get(sessionId);
@@ -793,3 +799,4 @@ app.on("activate", () => {
     createWindow();
   }
 });
+

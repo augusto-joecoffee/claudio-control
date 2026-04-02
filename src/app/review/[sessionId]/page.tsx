@@ -6,6 +6,7 @@ import type { ViewType } from "react-diff-view";
 import { useReview } from "@/hooks/useReview";
 import { useReviewDiff } from "@/hooks/useReviewDiff";
 import { useReviewQueue } from "@/hooks/useReviewQueue";
+import { useReviewCommits } from "@/hooks/useReviewCommits";
 import { DiffViewer, parseDiff, getFilePath } from "@/components/review/DiffViewer";
 import { FileTree } from "@/components/review/FileTree";
 import { CommentQueue } from "@/components/review/CommentQueue";
@@ -16,7 +17,9 @@ export default function ReviewPage() {
 	const sessionId = typeof params.sessionId === "string" ? decodeURIComponent(params.sessionId) : "";
 
 	const { review, comments, addComment, refresh: refreshReview } = useReview(sessionId);
-	const { diff, isLoading: diffLoading, refreshDiff } = useReviewDiff(sessionId);
+	const [selectedCommit, setSelectedCommit] = useState("all");
+	const { diff, isLoading: diffLoading, refreshDiff } = useReviewDiff(sessionId, selectedCommit);
+	const { commits } = useReviewCommits(sessionId);
 
 	const [paused, setPaused] = useState(false);
 	const [viewType, setViewType] = useState<ViewType>("split");
@@ -37,7 +40,7 @@ export default function ReviewPage() {
 		handleRefreshDiff();
 	}, [refreshReview, handleRefreshDiff]);
 
-	const { processingId, pendingCount, completedCount, sessionStatus } = useReviewQueue(sessionId, {
+	const { processingId, pendingCount, completedCount, sessionStatus, refresh: refreshQueue } = useReviewQueue(sessionId, {
 		paused,
 		onCommentResolved: handleCommentResolved,
 	});
@@ -73,8 +76,9 @@ export default function ReviewPage() {
 			await addComment(activeComment.filePath, activeComment.line, content, pendingSnippetRef.current);
 			setActiveComment(null);
 			pendingSnippetRef.current = "";
+			refreshQueue();
 		},
-		[activeComment, addComment],
+		[activeComment, addComment, refreshQueue],
 	);
 
 	const handleCancelComment = useCallback(() => {
@@ -87,6 +91,11 @@ export default function ReviewPage() {
 
 	const handleTogglePause = useCallback(() => {
 		setPaused((p) => !p);
+	}, []);
+
+	const handleSelectCommit = useCallback((hash: string) => {
+		setSelectedCommit(hash);
+		setSelectedFile(null);
 	}, []);
 
 	if (!review && !diffLoading) {
@@ -110,6 +119,9 @@ export default function ReviewPage() {
 				onToggleView={handleToggleView}
 				onRefreshDiff={handleRefreshDiff}
 				isRefreshing={isRefreshing}
+				commits={commits}
+				selectedCommit={selectedCommit}
+				onSelectCommit={handleSelectCommit}
 			/>
 
 			{/* Main content */}

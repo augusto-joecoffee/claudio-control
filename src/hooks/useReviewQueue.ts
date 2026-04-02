@@ -32,7 +32,7 @@ export function useReviewQueue(
 			refreshInterval: (latestData: QueueStatus | undefined) => {
 				if (!latestData) return 2000; // Initial load
 				if (latestData.processingId || latestData.pendingCount > 0) return 2000;
-				return 0; // Idle — stop polling
+				return 5000; // Idle — poll slowly as safety net
 			},
 			revalidateOnFocus: false,
 			dedupingInterval: 1000,

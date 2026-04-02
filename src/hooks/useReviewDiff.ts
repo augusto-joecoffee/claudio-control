@@ -6,9 +6,13 @@ const fetcher = (url: string) =>
 		return r.json();
 	});
 
-export function useReviewDiff(sessionId: string) {
+export function useReviewDiff(sessionId: string, commit: string = "all") {
+	const url = sessionId
+		? `/api/review/${encodeURIComponent(sessionId)}/diff${commit !== "all" ? `?commit=${encodeURIComponent(commit)}` : ""}`
+		: null;
+
 	const { data, error, isLoading, mutate } = useSWR<{ diff: string; diffStat: string }>(
-		sessionId ? `/api/review/${encodeURIComponent(sessionId)}/diff` : null,
+		url,
 		fetcher,
 		{ revalidateOnFocus: false, dedupingInterval: 3000 },
 	);
