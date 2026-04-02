@@ -289,7 +289,7 @@ export function QuickActions({
           </svg>
         </IconButton>
       ) : null}
-      {hasChanges && sessionId && (
+      {sessionId && (
         <IconButton onClick={openReview} tip="Review" className={`flex-1 flex items-center justify-center h-8 rounded-lg border transition-all duration-150 ${
           reviewOpen
             ? "bg-violet-500/10 hover:bg-violet-500/22 border-violet-500/20 hover:border-violet-500/40 text-violet-400 hover:text-violet-300"
