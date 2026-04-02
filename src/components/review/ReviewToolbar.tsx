@@ -58,7 +58,8 @@ export const ReviewToolbar = memo(function ReviewToolbar({
 			>
 				<option value="all">All changes</option>
 				<option value="uncommitted">Uncommitted changes</option>
-				<option value="committed">Committed (not pushed)</option>
+				<option value="branch">All branch commits</option>
+				<option value="committed">Unpushed commits</option>
 				{commits.length > 0 && <option disabled>───────────</option>}
 				{commits.map((c) => (
 					<option key={c.hash} value={c.hash}>

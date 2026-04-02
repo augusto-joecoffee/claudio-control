@@ -78,11 +78,17 @@ export async function getFullDiff(cwd: string, mergeBase: string): Promise<strin
 }
 
 /**
- * Get only committed changes (merge-base..HEAD) without working tree changes.
+ * Get all committed changes on the branch (merge-base..HEAD).
+ */
+export async function getBranchDiff(cwd: string, mergeBase: string): Promise<string> {
+	return gitCommand(["diff", `${mergeBase}..HEAD`, "--unified=5"], cwd);
+}
+
+/**
+ * Get only unpushed commits (upstream..HEAD).
+ * Falls back to all branch commits if no upstream is set.
  */
 export async function getCommittedDiff(cwd: string, mergeBase: string): Promise<string> {
-	// Diff against the remote tracking branch (unpushed commits only)
-	// Falls back to mergeBase if the branch has never been pushed
 	const upstream = await gitCommand(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
 	const base = upstream || mergeBase;
 	return gitCommand(["diff", `${base}..HEAD`, "--unified=5"], cwd);

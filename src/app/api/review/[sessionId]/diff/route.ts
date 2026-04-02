@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadReview } from "@/lib/review-store";
-import { getFullDiff, getDiffStat, getCommitDiff, getCommittedDiff, getUncommittedDiff } from "@/lib/review-diff";
+import { getFullDiff, getDiffStat, getCommitDiff, getCommittedDiff, getUncommittedDiff, getBranchDiff } from "@/lib/review-diff";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ sess
 
 	if (commit === "committed") {
 		const diff = await getCommittedDiff(cwd, review.mergeBase);
+		return NextResponse.json({ diff, diffStat: "" });
+	}
+
+	if (commit === "branch") {
+		const diff = await getBranchDiff(cwd, review.mergeBase);
 		return NextResponse.json({ diff, diffStat: "" });
 	}
 
