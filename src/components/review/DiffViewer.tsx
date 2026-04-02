@@ -22,6 +22,7 @@ interface DiffViewerProps {
 	isViewed?: (path: string) => boolean;
 	onToggleViewed?: (path: string) => void;
 	sessionId?: string;
+	onOpenInEditor?: (filePath: string) => void;
 }
 
 function getFilePath(file: FileData): string {
@@ -100,6 +101,7 @@ const FileDiff = memo(function FileDiff({
 	isViewed,
 	onToggleViewed,
 	sessionId,
+	onOpenInEditor,
 }: {
 	file: FileData;
 	viewType: ViewType;
@@ -113,6 +115,7 @@ const FileDiff = memo(function FileDiff({
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
+	onOpenInEditor?: (filePath: string) => void;
 }) {
 	const filePath = getFilePath(file);
 
@@ -278,8 +281,11 @@ const FileDiff = memo(function FileDiff({
 				</span>
 				<span
 					className="text-xs text-zinc-300 font-mono cursor-pointer hover:text-zinc-100 transition-colors flex-1"
-					onClick={() => navigator.clipboard.writeText(filePath)}
-					title="Click to copy path"
+					onClick={() => {
+						navigator.clipboard.writeText(filePath);
+						onOpenInEditor?.(filePath);
+					}}
+					title="Click to copy path & open in editor"
 				>{filePath}</span>
 				{onToggleViewed && (
 					<button
@@ -290,8 +296,12 @@ const FileDiff = memo(function FileDiff({
 								: "border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600"
 						}`}
 					>
-						<svg className="w-3 h-3" fill={isViewed ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-							<path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+						<svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+							{isViewed ? (
+								<path d="M4.5 12.75l6 6 9-13.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="text-emerald-400" />
+							) : (
+								<rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+							)}
 						</svg>
 						Viewed
 					</button>
@@ -397,6 +407,7 @@ function LazyFileDiff(props: {
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
+	onOpenInEditor?: (filePath: string) => void;
 }) {
 	const [visible, setVisible] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -434,6 +445,7 @@ export const DiffViewer = memo(function DiffViewer({
 	isViewed,
 	onToggleViewed,
 	sessionId,
+	onOpenInEditor,
 }: DiffViewerProps) {
 	const files = useMemo(() => {
 		if (!rawDiff) return [];
@@ -472,7 +484,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onDeleteComment={onDeleteComment}
 					isViewed={isViewed?.(selectedFile) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(selectedFile!) : undefined}
-				sessionId={sessionId}
+					sessionId={sessionId}
+					onOpenInEditor={onOpenInEditor}
 				/>
 			</div>
 		);
@@ -497,7 +510,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onDeleteComment={onDeleteComment}
 					isViewed={isViewed?.(fp) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(fp) : undefined}
-				sessionId={sessionId}
+					sessionId={sessionId}
+					onOpenInEditor={onOpenInEditor}
 				/>
 				);
 			})}

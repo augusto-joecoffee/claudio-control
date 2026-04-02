@@ -13,6 +13,7 @@ interface FileTreeProps {
 	onToggleViewed?: (path: string) => void;
 	viewedCount?: number;
 	totalFiles?: number;
+	uncommittedFiles?: Set<string>;
 }
 
 function fileStatus(type: string): { label: string; color: string } {
@@ -42,7 +43,7 @@ function countChanges(file: FileData): { additions: number; deletions: number } 
 	return { additions, deletions };
 }
 
-export const FileTree = memo(function FileTree({ files, selectedFile, commentCounts, onSelectFile, onCollapse, isViewed, onToggleViewed, viewedCount, totalFiles }: FileTreeProps) {
+export const FileTree = memo(function FileTree({ files, selectedFile, commentCounts, onSelectFile, onCollapse, isViewed, onToggleViewed, viewedCount, totalFiles, uncommittedFiles }: FileTreeProps) {
 	return (
 		<div className="flex flex-col h-full">
 			<div className="px-3 py-2 border-b border-zinc-800/50 flex items-center justify-between">
@@ -76,6 +77,7 @@ export const FileTree = memo(function FileTree({ files, selectedFile, commentCou
 					const comments = commentCounts[filePath] ?? 0;
 					const isSelected = selectedFile === filePath;
 					const viewed = isViewed?.(filePath) ?? false;
+					const isUncommitted = uncommittedFiles?.has(filePath) ?? false;
 
 					return (
 						<div
@@ -90,11 +92,12 @@ export const FileTree = memo(function FileTree({ files, selectedFile, commentCou
 									className="pl-2 py-1.5 text-zinc-600 hover:text-emerald-400 transition-colors shrink-0"
 									title={viewed ? "Mark as unviewed" : "Mark as viewed"}
 								>
-									<svg className="w-3.5 h-3.5" fill={viewed ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-										{viewed
-											? <path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-											: <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-										}
+									<svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+										{viewed ? (
+											<path d="M4.5 12.75l6 6 9-13.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="text-emerald-400" />
+										) : (
+											<rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+										)}
 									</svg>
 								</button>
 							)}
@@ -106,6 +109,9 @@ export const FileTree = memo(function FileTree({ files, selectedFile, commentCou
 								<span className="truncate flex-1 text-zinc-300" title={filePath}>
 									{filePath.split("/").pop()}
 								</span>
+								{isUncommitted && (
+									<span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Uncommitted changes" />
+								)}
 								<span className="flex items-center gap-1 shrink-0">
 									{additions > 0 && <span className="text-emerald-500 text-[10px]">+{additions}</span>}
 									{deletions > 0 && <span className="text-red-500 text-[10px]">-{deletions}</span>}

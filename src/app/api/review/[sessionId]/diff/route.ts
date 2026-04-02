@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadReview } from "@/lib/review-store";
-import { getFullDiff, getDiffStat, getCommitDiff, getCommittedDiff, getUncommittedDiff, getBranchDiff } from "@/lib/review-diff";
+import { getFullDiff, getDiffStat, getCommitDiff, getCommittedDiff, getUncommittedDiff, getBranchDiff, getUncommittedFiles } from "@/lib/review-diff";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +37,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ sess
 	}
 
 	// Full diff (all commits + working tree)
-	const [diff, diffStat] = await Promise.all([
+	const [diff, diffStat, uncommittedFiles] = await Promise.all([
 		getFullDiff(cwd, review.mergeBase),
 		getDiffStat(cwd, review.mergeBase),
+		getUncommittedFiles(cwd),
 	]);
 
-	return NextResponse.json({ diff, diffStat });
+	return NextResponse.json({ diff, diffStat, uncommittedFiles });
 }
