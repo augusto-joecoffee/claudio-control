@@ -85,6 +85,21 @@ export default function ReviewPage() {
 		setActiveComment(null);
 	}, []);
 
+	const handleCommentAction = useCallback(
+		async (commentId: string, action: "resolve" | "delete") => {
+			await fetch(`/api/review/${encodeURIComponent(sessionId)}/comments`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ commentId, action }),
+			});
+			refreshReview();
+		},
+		[sessionId, refreshReview],
+	);
+
+	const handleResolveComment = useCallback((id: string) => handleCommentAction(id, "resolve"), [handleCommentAction]);
+	const handleDeleteComment = useCallback((id: string) => handleCommentAction(id, "delete"), [handleCommentAction]);
+
 	const [, startTransition] = useTransition();
 
 	const handleToggleView = useCallback(() => {
@@ -157,6 +172,8 @@ export default function ReviewPage() {
 						onGutterClick={handleGutterClick}
 						onSubmitComment={handleSubmitComment}
 						onCancelComment={handleCancelComment}
+						onResolveComment={handleResolveComment}
+						onDeleteComment={handleDeleteComment}
 						selectedFile={selectedFile}
 					/>
 				)}

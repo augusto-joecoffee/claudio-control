@@ -53,3 +53,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
 
 	return NextResponse.json({ comment });
 }
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
+	const { sessionId } = await params;
+	const review = await loadReview(sessionId);
+
+	if (!review) {
+		return NextResponse.json({ error: "Review not found" }, { status: 404 });
+	}
+
+	const { commentId, action } = (await request.json()) as { commentId: string; action: "resolve" | "delete" };
+	const idx = review.comments.findIndex((c) => c.id === commentId);
+	if (idx === -1) {
+		return NextResponse.json({ error: "Comment not found" }, { status: 404 });
+	}
+
+	if (action === "delete") {
+		review.comments.splice(idx, 1);
+	} else if (action === "resolve") {
+		review.comments[idx].status = "resolved";
+		review.comments[idx].resolvedAt = new Date().toISOString();
+	}
+
+	await saveReview(sessionId, review);
+	return NextResponse.json({ ok: true });
+}

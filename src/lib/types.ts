@@ -179,7 +179,7 @@ export interface KanbanState {
 
 // ── Code Review ──
 
-export type ReviewCommentStatus = "pending" | "sending" | "processing" | "resolved";
+export type ReviewCommentStatus = "pending" | "sending" | "processing" | "answered" | "resolved";
 
 export interface ReviewComment {
   id: string;

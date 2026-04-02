@@ -16,6 +16,8 @@ interface DiffViewerProps {
 	onGutterClick: (filePath: string, line: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
+	onResolveComment?: (id: string) => void;
+	onDeleteComment?: (id: string) => void;
 	selectedFile: string | null;
 }
 
@@ -71,6 +73,8 @@ const FileDiff = memo(function FileDiff({
 	onGutterClick,
 	onSubmitComment,
 	onCancelComment,
+	onResolveComment,
+	onDeleteComment,
 }: {
 	file: FileData;
 	viewType: ViewType;
@@ -79,6 +83,8 @@ const FileDiff = memo(function FileDiff({
 	onGutterClick: (filePath: string, line: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
+	onResolveComment?: (id: string) => void;
+	onDeleteComment?: (id: string) => void;
 }) {
 	const filePath = getFilePath(file);
 	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath), [comments, filePath]);
@@ -108,6 +114,8 @@ const FileDiff = memo(function FileDiff({
 						isAddingComment={isAdding}
 						onSubmitComment={onSubmitComment}
 						onCancelComment={onCancelComment}
+						onResolveComment={onResolveComment}
+						onDeleteComment={onDeleteComment}
 					/>
 				);
 			}
@@ -133,7 +141,7 @@ const FileDiff = memo(function FileDiff({
 		}
 
 		return w;
-	}, [fileComments, activeCommentLocation, filePath, file.hunks, onSubmitComment, onCancelComment]);
+	}, [fileComments, activeCommentLocation, filePath, file.hunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment]);
 
 	const handleGutterClick = useCallback(
 		({ change }: { change: ChangeData | null }) => {
@@ -218,6 +226,8 @@ function LazyFileDiff(props: {
 	onGutterClick: (filePath: string, line: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
+	onResolveComment?: (id: string) => void;
+	onDeleteComment?: (id: string) => void;
 }) {
 	const [visible, setVisible] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -249,6 +259,8 @@ export const DiffViewer = memo(function DiffViewer({
 	onGutterClick,
 	onSubmitComment,
 	onCancelComment,
+	onResolveComment,
+	onDeleteComment,
 	selectedFile,
 }: DiffViewerProps) {
 	const files = useMemo(() => {
@@ -284,6 +296,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onGutterClick={onGutterClick}
 					onSubmitComment={onSubmitComment}
 					onCancelComment={onCancelComment}
+					onResolveComment={onResolveComment}
+					onDeleteComment={onDeleteComment}
 				/>
 			</div>
 		);
@@ -302,6 +316,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onGutterClick={onGutterClick}
 					onSubmitComment={onSubmitComment}
 					onCancelComment={onCancelComment}
+					onResolveComment={onResolveComment}
+					onDeleteComment={onDeleteComment}
 				/>
 			))}
 		</div>

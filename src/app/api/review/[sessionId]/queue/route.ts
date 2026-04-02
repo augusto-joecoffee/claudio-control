@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadReview, saveReview } from "@/lib/review-store";
-import { discoverSessions, getSessionDetail } from "@/lib/discovery";
+import { discoverSessions } from "@/lib/discovery";
+import { readFullConversation, linesToConversation } from "@/lib/session-reader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 	for (const c of review.comments) {
 		if (c.status === "processing" || c.status === "sending") processing = c;
 		else if (c.status === "pending") pendingCount++;
-		else if (c.status === "resolved") completedCount++;
+		else if (c.status === "answered" || c.status === "resolved") completedCount++;
 	}
 
 	// Check the Claude session status
@@ -30,25 +31,53 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 	const session = sessions.find((s) => s.id === sessionId);
 	const sessionStatus = session?.status ?? "finished";
 
-	// If session went idle and there's a processing comment, mark it resolved and capture Claude's reply
+	// If session went idle and there's a processing comment, try to capture Claude's response.
+	// Only mark as answered if we find our specific comment in the JSONL with a response after it.
+	// The session can briefly go "idle" between tool calls — don't mark answered prematurely.
 	if (processing && (sessionStatus === "idle" || sessionStatus === "waiting") && processing.status === "processing") {
-		processing.status = "resolved";
-		processing.resolvedAt = new Date().toISOString();
-		// Fetch the full last assistant message (preview is truncated to 200 chars)
-		const detail = await getSessionDetail(sessionId);
-		if (detail?.conversation.length) {
-			const lastAssistant = detail.conversation.findLast((m) => m.type === "assistant" && m.text);
-			processing.response = lastAssistant?.text ?? null;
-		}
-		await saveReview(sessionId, review);
+		let response: string | null = null;
 
-		return NextResponse.json({
-			processingId: null,
-			pendingCount,
-			completedCount: completedCount + 1,
-			sessionStatus,
-			justResolved: processing.id,
-		});
+		if (session?.jsonlPath) {
+			try {
+				const lines = await readFullConversation(session.jsonlPath);
+				const conversation = linesToConversation(lines);
+				const promptSignature = `[Code Review Comment]\nFile: ${processing.filePath} (line ${processing.line})`;
+				const promptIdx = conversation.findLastIndex(
+					(m) => m.type === "user" && m.text?.includes(promptSignature),
+				);
+				if (promptIdx >= 0) {
+					// Take the LAST assistant text — this matches what the terminal displays.
+					// Earlier assistant messages are intermediate (before tool calls).
+					let lastText: string | null = null;
+					for (let i = promptIdx + 1; i < conversation.length; i++) {
+						const m = conversation[i];
+						if (m.type === "user") break;
+						if (m.type === "assistant" && m.text) lastText = m.text;
+					}
+					if (lastText) response = lastText;
+				}
+			} catch {
+				// ignore — will retry on next poll
+			}
+		}
+
+		// Only mark as answered if we found a real response to THIS comment
+		if (response) {
+			processing.status = "answered";
+			processing.response = response;
+			await saveReview(sessionId, review);
+
+			return NextResponse.json({
+				processingId: null,
+				pendingCount,
+				completedCount: completedCount + 1,
+				sessionStatus,
+				justResolved: processing.id,
+			});
+		}
+
+		// No response found yet — session may have briefly gone idle between tool calls.
+		// Keep status as "processing" and retry on next poll.
 	}
 
 	return NextResponse.json({
