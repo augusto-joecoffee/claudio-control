@@ -17,6 +17,25 @@ async function gitCommand(args: string[], cwd: string): Promise<string> {
 	}
 }
 
+/**
+ * Fast fingerprint of the current diff state.
+ * Uses --stat (which relies on git's stat cache) + HEAD hash + untracked file list.
+ * Changes whenever a file is committed, edited, staged, or added/removed.
+ */
+export async function getDiffFingerprint(cwd: string, mergeBase: string): Promise<string> {
+	const [head, stat, untracked] = await Promise.all([
+		gitCommand(["rev-parse", "HEAD"], cwd),
+		gitCommand(["diff", mergeBase, "--stat"], cwd),
+		gitCommand(["ls-files", "--others", "--exclude-standard"], cwd),
+	]);
+	const combined = `${head}\n${stat}\n${untracked}`;
+	let h = 0;
+	for (let i = 0; i < combined.length; i++) {
+		h = ((h << 5) - h + combined.charCodeAt(i)) | 0;
+	}
+	return h.toString(36);
+}
+
 export async function getMergeBase(cwd: string, baseBranch: string): Promise<string> {
 	return gitCommand(["merge-base", "HEAD", baseBranch], cwd);
 }

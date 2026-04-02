@@ -1,12 +1,21 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Diff, Hunk, Decoration, parseDiff, getChangeKey } from "react-diff-view";
+import { Diff, Hunk, Decoration, parseDiff, getChangeKey, tokenize } from "react-diff-view";
 import type { FileData, ChangeData, HunkData } from "react-diff-view";
 import type { GutterOptions, ViewType } from "react-diff-view";
+import { refractor as _refractor } from "refractor";
+
+// react-diff-view's tokenize expects highlight() to return an iterable (array of nodes),
+// but refractor v5 returns a Root node. Adapt by returning .children.
+const refractor = {
+	highlight: (code: string, language: string) => _refractor.highlight(code, language).children,
+	registered: (lang: string) => _refractor.registered(lang),
+};
 import type { ReviewComment } from "@/lib/types";
 import { CommentThread } from "./CommentThread";
 import "react-diff-view/style/index.css";
+import "./syntax-theme.css";
 
 interface DiffViewerProps {
 	rawDiff: string;
@@ -27,6 +36,46 @@ interface DiffViewerProps {
 
 function getFilePath(file: FileData): string {
 	return file.newPath === "/dev/null" ? file.oldPath : file.newPath;
+}
+
+const EXT_TO_LANG: Record<string, string> = {
+	ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+	py: "python", rb: "ruby", rs: "rust", go: "go", java: "java", kt: "kotlin", kts: "kotlin",
+	c: "c", h: "c", cpp: "cpp", cc: "cpp", cs: "csharp",
+	html: "markup", htm: "markup", xml: "markup", svg: "markup",
+	css: "css", scss: "css", less: "css",
+	json: "json", yaml: "yaml", yml: "yaml", toml: "toml",
+	sh: "bash", bash: "bash", zsh: "bash",
+	md: "markdown", mdx: "markdown",
+	sql: "sql", graphql: "graphql", gql: "graphql",
+	swift: "swift", dart: "dart", lua: "lua", r: "r",
+	dockerfile: "docker", makefile: "makefile",
+};
+
+function detectLanguage(filePath: string): string | null {
+	const name = filePath.split("/").pop()?.toLowerCase() ?? "";
+	if (name === "dockerfile") return "docker";
+	if (name === "makefile") return "makefile";
+	const ext = name.split(".").pop() ?? "";
+	const lang = EXT_TO_LANG[ext];
+	if (!lang) return null;
+	try {
+		if (refractor.registered(lang)) return lang;
+	} catch { /* ignore */ }
+	return null;
+}
+
+function useTokens(hunks: HunkData[], filePath: string) {
+	return useMemo(() => {
+		const lang = detectLanguage(filePath);
+		if (!lang || hunks.length === 0) return undefined;
+		try {
+			return tokenize(hunks, { highlight: true, refractor, language: lang });
+		} catch (e) {
+			console.warn("[syntax] tokenize failed for", filePath, e);
+			return undefined;
+		}
+	}, [hunks, filePath]);
 }
 
 /** Parse a unified diff and deduplicate entries that share the same file path. */
@@ -125,6 +174,8 @@ const FileDiff = memo(function FileDiff({
 
 	// Reset expanded hunks when the file changes
 	useEffect(() => { setExpandedHunks(file.hunks); }, [file.hunks]);
+
+	const tokens = useTokens(expandedHunks, filePath);
 
 	const fetchFileLines = useCallback(async () => {
 		if (fileLines || !sessionId) return fileLines;
@@ -316,6 +367,7 @@ const FileDiff = memo(function FileDiff({
 						diffType={file.type}
 						hunks={expandedHunks}
 						widgets={widgets}
+						tokens={tokens}
 						renderGutter={renderGutter}
 						gutterEvents={gutterEvents}
 					>

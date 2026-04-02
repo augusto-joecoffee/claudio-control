@@ -9,6 +9,7 @@ import { useReviewQueue } from "@/hooks/useReviewQueue";
 import { useReviewCommits } from "@/hooks/useReviewCommits";
 import { useReviewBranches } from "@/hooks/useReviewBranches";
 import { useViewedFiles } from "@/hooks/useViewedFiles";
+import { useAutoRefreshDiff } from "@/hooks/useAutoRefreshDiff";
 import { DiffViewer, parseDiff, getFilePath } from "@/components/review/DiffViewer";
 import { FileTree } from "@/components/review/FileTree";
 import { CommentQueue } from "@/components/review/CommentQueue";
@@ -38,6 +39,8 @@ export default function ReviewPage() {
 		await refreshDiff();
 		setIsRefreshing(false);
 	}, [refreshDiff]);
+
+	useAutoRefreshDiff(sessionId, refreshDiff);
 
 	const handleCommentResolved = useCallback(() => {
 		refreshReview();
