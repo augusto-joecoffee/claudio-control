@@ -152,6 +152,7 @@ try {
 }
 let mainWindow = null;
 let isQuitting = false;
+const reviewWindows = new Map(); // sessionId → BrowserWindow
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -413,6 +414,17 @@ ipcMain.handle("pty:spawn", (_event, { cols, rows, cwd, tmuxSession, command, wr
   return { ptyId: id };
 });
 
+// Copy a file from a temp/ephemeral location to a stable path.
+// Used for macOS screenshot preview drops where the source is deleted immediately.
+ipcMain.handle("file:copyTemp", async (_event, srcPath) => {
+  const dropDir = path.join(app.getPath("temp"), "claudio-drops");
+  await fs.promises.mkdir(dropDir, { recursive: true });
+  const ext = path.extname(srcPath);
+  const dest = path.join(dropDir, `${crypto.randomUUID()}${ext}`);
+  await fs.promises.copyFile(srcPath, dest);
+  return dest;
+});
+
 ipcMain.on("pty:write", (_event, { ptyId, data }) => {
   const proc = ptyProcesses.get(ptyId);
   if (proc) proc.write(data);
@@ -504,6 +516,137 @@ ipcMain.handle("pty:listInlineTmux", async () => {
   }
 });
 
+// ── Code Review Window ──
+
+// Returns { open } for the given session, so the UI can highlight the button
+ipcMain.handle("review:isOpen", (_event, { sessionId }) => {
+  if (!reviewWindows.has(sessionId)) return { open: false };
+  const win = reviewWindows.get(sessionId);
+  if (!win || win.isDestroyed()) return { open: false };
+  return { open: true };
+});
+
+// Capture window state in memory (not async disk) so the next window can use it immediately.
+function captureWindowState(win) {
+  if (!win || win.isDestroyed()) return null;
+  const isMaximized = win.isMaximized();
+  const isFullScreen = win.isFullScreen();
+  const bounds = win.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const normalBounds = win.getNormalBounds();
+  return {
+    x: normalBounds.x, y: normalBounds.y,
+    width: normalBounds.width, height: normalBounds.height,
+    isMaximized, isFullScreen,
+    displayId: display.id, displayBounds: display.bounds,
+  };
+}
+
+ipcMain.handle("review:openWindow", (_event, { sessionId, sessionName }) => {
+  // If this session's review is already open, toggle it closed
+  if (reviewWindows.has(sessionId)) {
+    const existing = reviewWindows.get(sessionId);
+    if (!existing.isDestroyed()) {
+      saveWindowState(existing, "review");
+      existing.close();
+    }
+    reviewWindows.delete(sessionId);
+    return;
+  }
+
+  // If another review window is open, reuse it — just navigate to the new URL.
+  // This keeps the window fullscreen/maximized without any macOS Space transition issues.
+  for (const [id, win] of reviewWindows) {
+    if (!win.isDestroyed()) {
+      win.loadURL(`http://localhost:${PORT}/review/${encodeURIComponent(sessionId)}`);
+      win.setTitle(`Review: ${sessionName || sessionId}`);
+      reviewWindows.delete(id);
+      reviewWindows.set(sessionId, win);
+      win.focus();
+      return;
+    }
+    reviewWindows.delete(id);
+  }
+
+  // No existing window — create a new one
+  const savedState = loadWindowState("review");
+
+  let windowOpts = { width: 1200, height: 900 };
+
+  if (savedState) {
+    windowOpts.width = savedState.width;
+    windowOpts.height = savedState.height;
+
+    if ((savedState.isFullScreen || savedState.isMaximized) && savedState.displayBounds) {
+      // normalBounds x/y can be on a different display than where the window
+      // was actually fullscreened — use the saved display bounds to target the right monitor
+      const db = savedState.displayBounds;
+      const target = screen.getDisplayNearestPoint({ x: db.x + db.width / 2, y: db.y + db.height / 2 });
+      windowOpts.x = target.bounds.x + Math.round((target.bounds.width - windowOpts.width) / 2);
+      windowOpts.y = target.bounds.y + Math.round((target.bounds.height - windowOpts.height) / 2);
+    } else {
+      // Normal window — use exact saved position if still on a connected display
+      const nearest = screen.getDisplayNearestPoint({ x: savedState.x, y: savedState.y });
+      const b = nearest.bounds;
+      if (savedState.x >= b.x && savedState.x < b.x + b.width &&
+          savedState.y >= b.y && savedState.y < b.y + b.height) {
+        windowOpts.x = savedState.x;
+        windowOpts.y = savedState.y;
+      }
+    }
+  }
+
+  const reviewWin = new BrowserWindow({
+    ...windowOpts,
+    minWidth: 800,
+    minHeight: 600,
+    title: `Review: ${sessionName || sessionId}`,
+    backgroundColor: "#050508",
+    icon: path.join(__dirname, "..", "public", "logo.png"),
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+
+  reviewWin.loadURL(`http://localhost:${PORT}/review/${encodeURIComponent(sessionId)}`);
+  reviewWindows.set(sessionId, reviewWin);
+
+  reviewWin.once("ready-to-show", () => {
+    if (savedState?.isFullScreen) {
+      reviewWin.setFullScreen(true);
+    } else if (savedState?.isMaximized) {
+      reviewWin.maximize();
+    }
+    reviewWin.show();
+
+    let saveTimeout;
+    const debouncedSave = () => {
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => saveWindowState(reviewWin, "review"), 1000);
+    };
+
+    reviewWin.on("resize", debouncedSave);
+    reviewWin.on("move", debouncedSave);
+    reviewWin.on("maximize", debouncedSave);
+    reviewWin.on("unmaximize", debouncedSave);
+    reviewWin.on("enter-full-screen", debouncedSave);
+    reviewWin.on("leave-full-screen", debouncedSave);
+    reviewWin.on("close", () => saveWindowState(reviewWin, "review"));
+  });
+
+  reviewWin.on("closed", () => {
+    reviewWindows.delete(sessionId);
+  });
+
+  reviewWin.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+});
+
 function killAllPtys() {
   for (const [id, proc] of ptyProcesses) {
     const tmuxName = ptyTmuxNames.get(id);
@@ -523,19 +666,21 @@ function killAllPtys() {
   ptyTmuxNames.clear();
 }
 
-function getWindowStatePath() {
-  return path.join(app.getPath("userData"), "window-state.json");
+const STATE_FILES = { main: "window-state.json", review: "review-window-state.json" };
+
+function getWindowStatePath(key) {
+  return path.join(app.getPath("userData"), STATE_FILES[key] || `${key}-window-state.json`);
 }
 
-function loadWindowState() {
+function loadWindowState(key) {
   try {
-    return JSON.parse(fs.readFileSync(getWindowStatePath(), "utf-8"));
+    return JSON.parse(fs.readFileSync(getWindowStatePath(key), "utf-8"));
   } catch {
     return null;
   }
 }
 
-function saveWindowState(win) {
+function saveWindowState(win, key) {
   if (!win || win.isDestroyed()) return;
 
   const isMaximized = win.isMaximized();
@@ -559,7 +704,7 @@ function saveWindowState(win) {
     displayBounds: display.bounds,
   };
 
-  fs.promises.writeFile(getWindowStatePath(), JSON.stringify(state, null, 2)).catch(() => {});
+  fs.promises.writeFile(getWindowStatePath(key), JSON.stringify(state, null, 2)).catch(() => {});
 }
 
 function findMatchingDisplay(savedState) {
@@ -583,31 +728,35 @@ function findMatchingDisplay(savedState) {
 }
 
 function createWindow() {
-  const savedState = loadWindowState();
-  const targetDisplay = findMatchingDisplay(savedState);
+  const savedState = loadWindowState("main");
 
   let windowOpts = { width: 1400, height: 900 };
 
-  if (savedState && targetDisplay) {
-    // Restore size, position on the correct display
-    windowOpts = {
-      x: savedState.x,
-      y: savedState.y,
-      width: savedState.width,
-      height: savedState.height,
-    };
-  } else if (savedState) {
-    // Display gone — use saved size, let OS pick position
-    windowOpts = {
-      width: savedState.width,
-      height: savedState.height,
-    };
+  if (savedState) {
+    windowOpts.width = savedState.width;
+    windowOpts.height = savedState.height;
+
+    if ((savedState.isFullScreen || savedState.isMaximized) && savedState.displayBounds) {
+      const db = savedState.displayBounds;
+      const target = screen.getDisplayNearestPoint({ x: db.x + db.width / 2, y: db.y + db.height / 2 });
+      windowOpts.x = target.bounds.x + Math.round((target.bounds.width - windowOpts.width) / 2);
+      windowOpts.y = target.bounds.y + Math.round((target.bounds.height - windowOpts.height) / 2);
+    } else {
+      const nearest = screen.getDisplayNearestPoint({ x: savedState.x, y: savedState.y });
+      const b = nearest.bounds;
+      if (savedState.x >= b.x && savedState.x < b.x + b.width &&
+          savedState.y >= b.y && savedState.y < b.y + b.height) {
+        windowOpts.x = savedState.x;
+        windowOpts.y = savedState.y;
+      }
+    }
   }
 
   mainWindow = new BrowserWindow({
     ...windowOpts,
     minWidth: 800,
     minHeight: 600,
+    acceptFirstMouse: true,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#050508",
@@ -627,7 +776,7 @@ function createWindow() {
     // Restore maximized/fullscreen after the window is on the correct display
     if (savedState?.isFullScreen) {
       mainWindow.setFullScreen(true);
-    } else if (savedState?.isMaximized && targetDisplay) {
+    } else if (savedState?.isMaximized) {
       mainWindow.maximize();
     }
     mainWindow.show();
@@ -637,7 +786,7 @@ function createWindow() {
     let saveTimeout;
     const debouncedSave = () => {
       clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => saveWindowState(mainWindow), 1000);
+      saveTimeout = setTimeout(() => saveWindowState(mainWindow, "main"), 1000);
     };
 
     mainWindow.on("resize", debouncedSave);
@@ -646,7 +795,7 @@ function createWindow() {
     mainWindow.on("unmaximize", debouncedSave);
     mainWindow.on("enter-full-screen", debouncedSave);
     mainWindow.on("leave-full-screen", debouncedSave);
-    mainWindow.on("close", () => saveWindowState(mainWindow));
+    mainWindow.on("close", () => saveWindowState(mainWindow, "main"));
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -697,3 +846,4 @@ app.on("activate", () => {
     createWindow();
   }
 });
+

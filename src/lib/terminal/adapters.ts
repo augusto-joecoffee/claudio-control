@@ -37,6 +37,8 @@ export async function sendText(info: TerminalInfo, text: string): Promise<void> 
     await execFileAsync(getTmuxPathSync(), ["send-keys", "-t", info.tmux.paneId, "-l", text], {
       timeout: PROCESS_TIMEOUT_MS,
     });
+    // Give the application time to process the bracketed paste before sending Enter
+    await new Promise((r) => setTimeout(r, 300));
     await execFileAsync(getTmuxPathSync(), ["send-keys", "-t", info.tmux.paneId, "Enter"], {
       timeout: PROCESS_TIMEOUT_MS,
     });

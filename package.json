@@ -1,6 +1,6 @@
 {
   "name": "claude-control",
-  "version": "0.30.1",
+  "version": "0.40.0",
   "description": "Desktop dashboard for monitoring and managing multiple Claude Code sessions",
   "author": "sverrirsig",
   "license": "MIT",
@@ -31,6 +31,7 @@
     "next": "^16.2.0",
     "node-pty": "^1.1.0",
     "react": "^19.2.4",
+    "react-diff-view": "^3.3.3",
     "react-dom": "^19.2.4",
     "swr": "^2.4.1"
   },
