@@ -43,7 +43,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 				const conversation = linesToConversation(lines);
 				// Match on file path and line — search for both with and without newline
 				// since tmux may alter whitespace when pasting
-				const fileSignature = `File: ${processing.filePath} (line ${processing.line})`;
+				const lineRef = processing.endLine ? `lines ${processing.line}-${processing.endLine}` : `line ${processing.line}`;
+				const fileSignature = `File: ${processing.filePath} (${lineRef})`;
 				const promptIdx = conversation.findLastIndex(
 					(m) => m.type === "user" && m.text?.includes(fileSignature),
 				);
@@ -148,7 +149,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 		return NextResponse.json({ sent: false, reason: "no-pending-comments" });
 	}
 
-	const prompt = formatReviewPrompt(nextPending.filePath, nextPending.line, nextPending.anchorSnippet, nextPending.content);
+	const prompt = formatReviewPrompt(nextPending.filePath, nextPending.line, nextPending.anchorSnippet, nextPending.content, nextPending.endLine);
 
 	try {
 		const res = await fetch(`http://localhost:3200/api/actions/open`, {
@@ -177,8 +178,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 	}
 }
 
-function formatReviewPrompt(filePath: string, line: number, anchorSnippet: string, content: string): string {
-	let prompt = `[Code Review Comment]\nFile: ${filePath} (line ${line})`;
+function formatReviewPrompt(filePath: string, line: number, anchorSnippet: string, content: string, endLine?: number): string {
+	const lineRef = endLine ? `lines ${line}-${endLine}` : `line ${line}`;
+	let prompt = `[Code Review Comment]\nFile: ${filePath} (${lineRef})`;
 	if (anchorSnippet) {
 		prompt += `\n\nContext:\n\`\`\`\n${anchorSnippet}\n\`\`\``;
 	}

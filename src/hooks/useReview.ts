@@ -14,11 +14,11 @@ export function useReview(sessionId: string) {
 		{ revalidateOnFocus: false, dedupingInterval: 2000 },
 	);
 
-	const addComment = async (filePath: string, line: number, content: string, anchorSnippet: string) => {
+	const addComment = async (filePath: string, line: number, content: string, anchorSnippet: string, endLine?: number) => {
 		const res = await fetch(`/api/review/${encodeURIComponent(sessionId)}/comments`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ filePath, line, content, anchorSnippet }),
+			body: JSON.stringify({ filePath, line, content, anchorSnippet, endLine }),
 		});
 		if (!res.ok) throw new Error("Failed to add comment");
 		const { comment } = (await res.json()) as { comment: ReviewComment };

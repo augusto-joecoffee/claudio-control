@@ -23,7 +23,7 @@ import { applyLayout } from "@/lib/apply-layout";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { groupSessions } from "@/lib/group-sessions";
 import { ClaudeSession, PrStatus, ViewMode } from "@/lib/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { EnableKanbanButton } from "./EnableKanbanButton";
 import { KanbanAwareGroup } from "./KanbanAwareGroup";
 import { SessionCard } from "./SessionCard";
@@ -109,7 +109,7 @@ function buildAccentMap(groupNames: string[]): Map<string, (typeof REPO_ACCENTS)
   return map;
 }
 
-export function SessionGrid({
+export const SessionGrid = memo(function SessionGrid({
   sessions,
   repoIds,
   viewMode,
@@ -542,4 +542,4 @@ export function SessionGrid({
       </DragOverlay>
     </DndContext>
   );
-}
+});

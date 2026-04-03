@@ -184,8 +184,10 @@ export type ReviewCommentStatus = "pending" | "sending" | "processing" | "answer
 export interface ReviewComment {
   id: string;
   filePath: string;
-  /** Line number on the NEW side of the diff. */
+  /** Start line number on the NEW side of the diff. */
   line: number;
+  /** End line number for multi-line selections (undefined = single line). */
+  endLine?: number;
   /** Original line number when comment was placed (for re-anchoring after edits). */
   originalLine: number;
   /** ~3 lines of surrounding code for fuzzy re-anchoring when lines shift. */

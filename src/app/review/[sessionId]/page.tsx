@@ -28,7 +28,7 @@ export default function ReviewPage() {
 	const [paused, setPaused] = useState(false);
 	const [viewType, setViewType] = useState<ViewType>("split");
 	const [selectedFile, setSelectedFile] = useState<string | null>(null);
-	const [activeComment, setActiveComment] = useState<{ filePath: string; line: number } | null>(null);
+	const [activeComment, setActiveComment] = useState<{ filePath: string; startLine: number; endLine: number } | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -73,10 +73,10 @@ export default function ReviewPage() {
 		return counts;
 	}, [comments]);
 
-	const handleGutterClick = useCallback((filePath: string, line: number, anchorSnippet: string) => {
+	const handleGutterClick = useCallback((filePath: string, startLine: number, endLine: number, anchorSnippet: string) => {
 		setActiveComment((prev) => {
-			if (prev?.filePath === filePath && prev?.line === line) return null;
-			return { filePath, line };
+			if (prev?.filePath === filePath && prev?.startLine === startLine && prev?.endLine === endLine) return null;
+			return { filePath, startLine, endLine };
 		});
 		pendingSnippetRef.current = anchorSnippet;
 	}, []);
@@ -84,7 +84,8 @@ export default function ReviewPage() {
 	const handleSubmitComment = useCallback(
 		async (content: string) => {
 			if (!activeComment) return;
-			await addComment(activeComment.filePath, activeComment.line, content, pendingSnippetRef.current);
+			const endLine = activeComment.startLine !== activeComment.endLine ? activeComment.endLine : undefined;
+			await addComment(activeComment.filePath, activeComment.startLine, content, pendingSnippetRef.current, endLine);
 			setActiveComment(null);
 			pendingSnippetRef.current = "";
 			refreshQueue();
