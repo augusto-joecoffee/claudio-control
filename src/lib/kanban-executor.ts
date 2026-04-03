@@ -27,6 +27,13 @@ export async function clearMessageBar(session: ClaudeSession): Promise<void> {
     throw new Error(`Session ${session.id} has no PID — cannot clear`);
   }
 
+  // Skip clearing for sessions with no conversation yet — sending Escape to
+  // Claude Code at the initial startup prompt enters Rewind mode.
+  if (!session.preview?.messageCount) {
+    console.log(`[kanban-exec] Skipping clear for session ${session.id} — no messages yet`);
+    return;
+  }
+
   console.log(`[kanban-exec] Clearing message bar for session ${session.id} (pid ${session.pid})`);
   const [tree, panes] = await Promise.all([buildProcessTree(), detectAllTmuxPanes()]);
   const info = await detectTerminal(session.pid, tree, panes);

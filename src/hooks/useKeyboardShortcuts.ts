@@ -16,6 +16,7 @@ interface UseKeyboardShortcutsOptions {
   onViewModeChange?: (mode: ViewMode) => void;
   onStartEdit?: (sessionId: string) => void;
   layout?: DashboardLayout | null;
+  repoIds?: Record<string, string>;
 }
 
 export function useKeyboardShortcuts({
@@ -27,13 +28,14 @@ export function useKeyboardShortcuts({
   onViewModeChange,
   onStartEdit,
   layout,
+  repoIds,
 }: UseKeyboardShortcutsOptions) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ label: string; color: string } | null>(null);
   const { editorAvailable, gitGuiAvailable } = useSettings();
 
   // Use the same grouped+flattened order as the grid renders
-  const orderedSessions = useMemo(() => flattenGroupedSessions(sessions, layout), [sessions, layout]);
+  const orderedSessions = useMemo(() => flattenGroupedSessions(sessions, layout, repoIds), [sessions, layout, repoIds]);
 
   // Clamp selection when sessions change (React 19 "adjust state during render" pattern)
   const [prevLength, setPrevLength] = useState(orderedSessions.length);

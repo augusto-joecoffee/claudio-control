@@ -68,6 +68,7 @@ export function SessionCard({
   onOpenTerminal,
   hasActiveTerminal,
   hasInlineTerminal,
+  onKill,
 }: {
   session: ClaudeSession;
   targetScreen?: number | null;
@@ -86,6 +87,7 @@ export function SessionCard({
   onOpenTerminal?: () => void;
   hasActiveTerminal?: boolean;
   hasInlineTerminal?: boolean;
+  onKill?: () => void;
 }) {
   const isSuppressed = !!actedOn;
   const showQuickReply = session.status === "waiting" && session.pid && !isSuppressed;
@@ -317,6 +319,7 @@ export function SessionCard({
               sessionId={session.id}
               sessionName={session.repoName || session.workingDirectory.split("/").pop() || session.id}
               hasChanges={!!session.git && (session.git.changedFiles > 0 || session.git.additions > 0 || session.git.untrackedFiles > 0)}
+              onKill={onKill}
             />
           )}
         </div>

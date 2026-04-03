@@ -31,22 +31,23 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 	const session = sessions.find((s) => s.id === sessionId);
 	const sessionStatus = session?.status ?? "finished";
 
-	// If session went idle and there's a processing comment, try to capture Claude's response.
-	// Only mark as answered if we find our specific comment in the JSONL with a response after it.
-	// The session can briefly go "idle" between tool calls — don't mark answered prematurely.
-	if (processing && (sessionStatus === "idle" || sessionStatus === "waiting") && processing.status === "processing") {
+	// Try to capture Claude's response for the processing comment.
+	// We attempt this in ALL session states (not just idle/waiting) so we don't
+	// miss the response when the session briefly flickers between states.
+	// However, we only force-unblock (timeout/error) when the session has settled.
+	if (processing && processing.status === "processing") {
 		let response: string | null = null;
 
 		if (session?.jsonlPath) {
 			try {
 				const lines = await readFullConversation(session.jsonlPath);
 				const conversation = linesToConversation(lines);
-				// Match on file path and line — search for both with and without newline
-				// since tmux may alter whitespace when pasting
+				// Match by unique comment ID first, fall back to file signature
+				const commentTag = `[id:${processing.id}]`;
 				const lineRef = processing.endLine ? `lines ${processing.line}-${processing.endLine}` : `line ${processing.line}`;
 				const fileSignature = `File: ${processing.filePath} (${lineRef})`;
 				const promptIdx = conversation.findLastIndex(
-					(m) => m.type === "user" && m.text?.includes(fileSignature),
+					(m) => m.type === "user" && (m.text?.includes(commentTag) || m.text?.includes(fileSignature)),
 				);
 				if (promptIdx >= 0) {
 					// Take the LAST assistant text — this matches what the terminal displays.
@@ -64,7 +65,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 			}
 		}
 
-		// Only mark as answered if we found a real response to THIS comment
+		// If we found a response, mark as answered regardless of session state
 		if (response) {
 			processing.status = "answered";
 			processing.response = response;
@@ -79,21 +80,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 			});
 		}
 
-		// No response found yet. If the comment has been processing for over 2 minutes,
-		// force it to answered to unblock the queue.
-		const processingAge = Date.now() - new Date(processing.createdAt).getTime();
-		if (!response && processingAge > 120_000) {
-			processing.status = "answered";
-			processing.response = null;
-			await saveReview(sessionId, review);
+		// No response found — only force-unblock when session has settled
+		const sessionSettled = sessionStatus === "idle" || sessionStatus === "waiting" || sessionStatus === "errored";
+		if (sessionSettled) {
+			const processingAge = Date.now() - new Date(processing.createdAt).getTime();
+			if (sessionStatus === "errored" || processingAge > 120_000) {
+				processing.status = "answered";
+				processing.response = sessionStatus === "errored"
+					? "The session encountered an error while processing this comment."
+					: null;
+				await saveReview(sessionId, review);
 
-			return NextResponse.json({
-				processingId: null,
-				pendingCount,
-				completedCount: completedCount + 1,
-				sessionStatus,
-				justResolved: processing.id,
-			});
+				return NextResponse.json({
+					processingId: null,
+					pendingCount,
+					completedCount: completedCount + 1,
+					sessionStatus,
+					justResolved: processing.id,
+				});
+			}
 		}
 	}
 
@@ -149,7 +154,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 		return NextResponse.json({ sent: false, reason: "no-pending-comments" });
 	}
 
-	const prompt = formatReviewPrompt(nextPending.filePath, nextPending.line, nextPending.anchorSnippet, nextPending.content, nextPending.endLine);
+	const prompt = formatReviewPrompt(nextPending.id, nextPending.filePath, nextPending.line, nextPending.anchorSnippet, nextPending.content, nextPending.endLine);
 
 	try {
 		const res = await fetch(`http://localhost:3200/api/actions/open`, {
@@ -178,9 +183,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 	}
 }
 
-function formatReviewPrompt(filePath: string, line: number, anchorSnippet: string, content: string, endLine?: number): string {
+function formatReviewPrompt(commentId: string, filePath: string, line: number, anchorSnippet: string, content: string, endLine?: number): string {
 	const lineRef = endLine ? `lines ${line}-${endLine}` : `line ${line}`;
-	let prompt = `[Code Review Comment]\nFile: ${filePath} (${lineRef})`;
+	let prompt = `[Code Review Comment] [id:${commentId}]\nFile: ${filePath} (${lineRef})`;
 	if (anchorSnippet) {
 		prompt += `\n\nContext:\n\`\`\`\n${anchorSnippet}\n\`\`\``;
 	}
