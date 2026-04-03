@@ -44,6 +44,10 @@ export default function Dashboard() {
   const [dismissToast, setDismissToast] = useState(false);
   // Optimistic approve/reject state: sessionId → { action, timestamp }
   const [actedSessions, setActedSessions] = useState<Record<string, { action: "approve" | "reject"; at: number }>>({});
+  // Optimistic sessions — placeholder cards shown immediately on create
+  const [optimisticSessions, setOptimisticSessions] = useState<ClaudeSession[]>([]);
+  // Optimistic kills — session IDs hidden immediately on kill
+  const [killedSessionIds, setKilledSessionIds] = useState<Record<string, number>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [terminals, setTerminals] = useState<Map<string, TerminalEntry>>(() => {
     const stored = getTerminalStore();
@@ -63,6 +67,39 @@ export default function Dashboard() {
 
   const handleNewInRepo = useCallback((repoPath: string, repoName: string) => {
     setModal({ repoPath, repoName });
+  }, []);
+
+  const handleSessionCreated = useCallback(({ path, repoPath, repoName }: { path: string; repoPath?: string; repoName?: string }) => {
+    const isWorktree = !!repoPath && path !== repoPath;
+    const name = repoName || repoPath?.split("/").filter(Boolean).pop() || path.split("/").filter(Boolean).pop() || path;
+    const placeholder: ClaudeSession = {
+      id: `optimistic-${Date.now()}`,
+      pid: 0,
+      workingDirectory: path,
+      repoName: name,
+      parentRepo: isWorktree ? repoPath! : null,
+      isWorktree,
+      branch: null,
+      status: "working",
+      lastActivity: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      git: null,
+      preview: { lastUserMessage: null, lastAssistantText: null, assistantIsNewer: false, lastTools: [], messageCount: 0 },
+      taskSummary: null,
+      initialPrompt: null,
+      hasPendingToolUse: false,
+      lastStopReason: null,
+      jsonlPath: null,
+      prUrl: null,
+      orphaned: false,
+      tmuxSession: null,
+    };
+    setOptimisticSessions((prev) => [...prev, placeholder]);
+    refresh();
+  }, [refresh]);
+
+  const handleSessionKilled = useCallback((sessionId: string) => {
+    setKilledSessionIds((prev) => ({ ...prev, [sessionId]: Date.now() }));
   }, []);
 
   const handleViewModeChange = useCallback((mode: ViewMode) => {
@@ -135,8 +172,8 @@ export default function Dashboard() {
     });
     setActiveTerminalDir((prev) => (prev === dir ? null : prev));
     // Refresh session list after process dies (second refresh catches tmux kill propagation)
+    setTimeout(() => refresh(), 500);
     setTimeout(() => refresh(), 1500);
-    setTimeout(() => refresh(), 4000);
   }, [refresh]);
 
   const handleMinimizeTerminal = useCallback(() => {
@@ -271,8 +308,22 @@ export default function Dashboard() {
     return ids;
   }, [terminals]);
 
+  // Merge optimistic state: add placeholder sessions, remove killed ones
+  const mergedSessions = useMemo(() => {
+    let result = sessions;
+    if (Object.keys(killedSessionIds).length > 0) {
+      result = result.filter((s) => !(s.id in killedSessionIds));
+    }
+    if (optimisticSessions.length > 0) {
+      const existingDirs = new Set(result.map((s) => s.workingDirectory));
+      const newOpts = optimisticSessions.filter((o) => !existingDirs.has(o.workingDirectory));
+      if (newOpts.length > 0) result = [...result, ...newOpts];
+    }
+    return result;
+  }, [sessions, killedSessionIds, optimisticSessions]);
+
   const { selectedIndex, setSelectedIndex, selectedSession, actionFeedback } = useKeyboardShortcuts({
-    sessions,
+    sessions: mergedSessions,
     targetScreen,
     onNewGlobal: handleNewGlobal,
     onNewInRepo: handleNewInRepo,
@@ -280,6 +331,7 @@ export default function Dashboard() {
     onViewModeChange: handleViewModeChange,
     onStartEdit: handleStartEdit,
     layout,
+    repoIds,
   });
 
   // Clear optimistic state when backend catches up or after timeout
@@ -323,7 +375,40 @@ export default function Dashboard() {
       return () => clearTimeout(timer);
     }
   }, [sessions, actedSessions]);
-  const prStatuses = usePrStatus(sessions);
+
+  // Clean up optimistic sessions once discovery finds the real session (matched by workingDirectory)
+  useEffect(() => {
+    if (optimisticSessions.length === 0) return;
+    const now = Date.now();
+    setOptimisticSessions((prev) =>
+      prev.filter((opt) => {
+        const elapsed = now - new Date(opt.lastActivity).getTime();
+        // Remove if a real session appeared with the same workingDirectory, or after 15s
+        const realExists = sessions.some((s) => s.workingDirectory === opt.workingDirectory);
+        return !realExists && elapsed < 15_000;
+      }),
+    );
+  }, [sessions, optimisticSessions.length]);
+
+  // Clean up killed session IDs once discovery confirms removal or after 10s
+  useEffect(() => {
+    const ids = Object.keys(killedSessionIds);
+    if (ids.length === 0) return;
+    const now = Date.now();
+    const toRemove = ids.filter((id) => {
+      const gone = !sessions.some((s) => s.id === id);
+      return gone || now - killedSessionIds[id] >= 10_000;
+    });
+    if (toRemove.length > 0) {
+      setKilledSessionIds((prev) => {
+        const next = { ...prev };
+        for (const id of toRemove) delete next[id];
+        return next;
+      });
+    }
+  }, [sessions, killedSessionIds]);
+
+  const prStatuses = usePrStatus(mergedSessions);
   const { notifications: notificationsEnabled, notificationSound: soundEnabled, alwaysNotify } = settings;
 
   // Track confirmed statuses (only update after a status has been stable for 2 polls)
@@ -333,11 +418,11 @@ export default function Dashboard() {
   const playChime = useNotificationSound();
   const handleNotificationClick = useCallback(
     (sessionId: string) => {
-      const ordered = flattenGroupedSessions(sessions);
+      const ordered = flattenGroupedSessions(mergedSessions, undefined, repoIds);
       const idx = ordered.findIndex((s) => s.id === sessionId);
       if (idx >= 0) setSelectedIndex(idx);
     },
-    [sessions, setSelectedIndex],
+    [mergedSessions, repoIds, setSelectedIndex],
   );
   const sendNotification = useDesktopNotification(alwaysNotify, handleNotificationClick);
 
@@ -439,13 +524,13 @@ export default function Dashboard() {
       <div className="flex-1 overflow-y-auto px-6 pt-10 pb-8">
         <div className="w-full">
       <DashboardHeader
-        sessionCount={sessions.length}
+        sessionCount={mergedSessions.length}
         onNewSession={handleNewGlobal}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
       />
 
-      {isLoading && sessions.length === 0 && (
+      {isLoading && mergedSessions.length === 0 && (
         <div className="flex flex-col items-center justify-center py-32">
           <div className="w-10 h-10 rounded-full border-2 border-zinc-800 border-t-zinc-500 animate-spin mb-4" />
           <p className="text-zinc-500 text-sm">Scanning for sessions...</p>
@@ -467,9 +552,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      {!(isLoading && sessions.length === 0) && (
+      {!(isLoading && mergedSessions.length === 0) && (
         <SessionGrid
-          sessions={sessions}
+          sessions={mergedSessions}
           repoIds={repoIds}
           viewMode={viewMode}
           targetScreen={targetScreen}
@@ -491,10 +576,11 @@ export default function Dashboard() {
           onOpenTerminal={handleOpenTerminal}
           activeTerminalSessionId={activeTerminalDir && !terminalMinimized ? terminals.get(activeTerminalDir)?.sessionId ?? null : null}
           inlineTerminalSessionIds={inlineTerminalSessionIds}
+          onKillSession={handleSessionKilled}
         />
       )}
 
-      {sessions.length > 0 && showKeyboardHints && (
+      {mergedSessions.length > 0 && showKeyboardHints && (
         <KeyboardHints
           selectedSession={selectedSession}
           actionFeedback={actionFeedback}
@@ -528,7 +614,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {modal && <NewSessionModal repoPath={modal.repoPath} repoName={modal.repoName} onClose={() => setModal(null)} onCreated={refresh} onInlineSession={handleInlineSession} />}
+      {modal && <NewSessionModal repoPath={modal.repoPath} repoName={modal.repoName} onClose={() => setModal(null)} onCreated={handleSessionCreated} onInlineSession={handleInlineSession} />}
         </div>
       </div>
 
@@ -540,7 +626,7 @@ export default function Dashboard() {
             activeDir={activeTerminalDir}
             minimized={terminalMinimized}
             height={terminalHeight}
-            sessions={sessions}
+            sessions={mergedSessions}
             onClose={handleCloseTerminal}
             onMinimize={handleMinimizeTerminal}
             onSwitch={handleSwitchTerminal}

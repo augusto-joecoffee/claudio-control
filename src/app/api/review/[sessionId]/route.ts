@@ -13,6 +13,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 	// Return existing review if it exists
 	const existing = await loadReview(sessionId);
 	if (existing) {
+		// Backfill prUrl if missing (reviews created before this field was added)
+		if (!existing.prUrl) {
+			const sessions = await discoverSessions();
+			const session = sessions.find((s) => s.id === sessionId);
+			if (session?.prUrl) {
+				existing.prUrl = session.prUrl;
+				await saveReview(sessionId, existing);
+			}
+		}
 		return NextResponse.json(existing);
 	}
 
@@ -43,6 +52,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 		comments: [],
 		queueHead: 0,
 		createdAt: new Date().toISOString(),
+		prUrl: session.prUrl ?? undefined,
 	};
 
 	await saveReview(sessionId, review);

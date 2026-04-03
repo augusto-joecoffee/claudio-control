@@ -132,6 +132,7 @@ export const SessionGrid = memo(function SessionGrid({
   onOpenTerminal,
   activeTerminalSessionId,
   inlineTerminalSessionIds,
+  onKillSession,
 }: {
   sessions: ClaudeSession[];
   repoIds?: Record<string, string>;
@@ -155,6 +156,7 @@ export const SessionGrid = memo(function SessionGrid({
   onOpenTerminal?: (session: ClaudeSession) => void;
   activeTerminalSessionId?: string | null;
   inlineTerminalSessionIds?: Set<string>;
+  onKillSession?: (sessionId: string) => void;
 }) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [activeDragType, setActiveDragType] = useState<"section" | "card" | null>(null);
@@ -276,6 +278,7 @@ export const SessionGrid = memo(function SessionGrid({
         onOpenTerminal={onOpenTerminal ? () => onOpenTerminal(session) : undefined}
         hasActiveTerminal={activeTerminalSessionId === session.id}
         hasInlineTerminal={inlineTerminalSessionIds?.has(session.id) ?? false}
+        onKill={onKillSession ? () => onKillSession(session.id) : undefined}
       />
     );
   };

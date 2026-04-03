@@ -49,6 +49,7 @@ export function QuickActions({
   sessionId,
   sessionName,
   hasChanges,
+  onKill,
 }: {
   path: string;
   pid?: number | null;
@@ -64,6 +65,7 @@ export function QuickActions({
   sessionId?: string;
   sessionName?: string;
   hasChanges?: boolean;
+  onKill?: () => void;
 }) {
   const [prSending, setPrSending] = useState(false);
   const [killing, setKilling] = useState(false);
@@ -79,6 +81,12 @@ export function QuickActions({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid }),
       });
+      // Close the review window if one is open for this session
+      if (sessionId) {
+        const api = (window as unknown as { electronAPI?: { closeReviewWindow: (id: string) => Promise<void> } }).electronAPI;
+        api?.closeReviewWindow(sessionId).catch(() => {});
+      }
+      onKill?.();
     } catch (err) {
       console.error("Kill failed:", err);
     }

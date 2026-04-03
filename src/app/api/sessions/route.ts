@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { discoverSessions } from "@/lib/discovery";
+import { discoverSessions, invalidateSessionCache } from "@/lib/discovery";
 import { areHooksInstalled, ensureHooksInstalled } from "@/lib/hooks-installer";
 import { resolveRepoIds } from "@/lib/repo-registry";
 
@@ -7,11 +7,17 @@ export const dynamic = "force-dynamic";
 
 let hookInstallAttempted = false;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     if (!hookInstallAttempted) {
       hookInstallAttempted = true;
       await ensureHooksInstalled();
+    }
+
+    // Allow callers to bust the server-side discovery cache
+    const url = new URL(request.url);
+    if (url.searchParams.has("fresh")) {
+      invalidateSessionCache();
     }
 
     const sessions = await discoverSessions();

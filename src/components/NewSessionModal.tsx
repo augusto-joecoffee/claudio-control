@@ -25,7 +25,7 @@ interface Props {
   repoPath?: string;
   repoName?: string;
   onClose: () => void;
-  onCreated?: () => void;
+  onCreated?: (info: { path: string; repoPath?: string; repoName?: string }) => void;
   onInlineSession?: (cwd: string, prompt?: string) => void;
 }
 
@@ -394,7 +394,7 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
       }
 
       onClose();
-      onCreated?.();
+      onCreated?.({ path: data.path || targetRepo, repoPath, repoName });
 
       if (data.inline && onInlineSession) {
         onInlineSession(data.path, data.prompt ?? undefined);

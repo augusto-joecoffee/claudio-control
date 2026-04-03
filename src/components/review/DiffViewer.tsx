@@ -12,7 +12,7 @@ const refractor = {
 	highlight: (code: string, language: string) => _refractor.highlight(code, language).children,
 	registered: (lang: string) => _refractor.registered(lang),
 };
-import type { ReviewComment } from "@/lib/types";
+import type { GitHubReviewComment, ReviewComment } from "@/lib/types";
 import { CommentThread } from "./CommentThread";
 import "react-diff-view/style/index.css";
 import "./syntax-theme.css";
@@ -27,11 +27,16 @@ interface DiffViewerProps {
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
+	onReplyComment?: (parentId: string, content: string) => void;
+	githubComments?: GitHubReviewComment[];
+	onReplyGitHubComment?: (threadId: string, content: string) => void;
+	onResolveGitHubThread?: (threadId: string) => void;
 	selectedFile: string | null;
 	isViewed?: (path: string) => boolean;
 	onToggleViewed?: (path: string) => void;
 	sessionId?: string;
 	onOpenInEditor?: (filePath: string) => void;
+	isLoading?: boolean;
 }
 
 function getFilePath(file: FileData): string {
@@ -132,18 +137,52 @@ function findChangeIndexByNewLine(hunks: HunkData[], line: number): { hunk: Hunk
 	return null;
 }
 
-/** Build "normal" change entries from raw file lines for expanding context. */
-function buildNormalChanges(lines: string[], startLine: number, count: number): ChangeData[] {
+/** Find a change by line number, trying new side first, then old side, then nearest. */
+function findChangeByAnyLine(hunks: HunkData[], line: number): { hunk: HunkData; index: number } | null {
+	// Try exact match on new side
+	const byNew = findChangeIndexByNewLine(hunks, line);
+	if (byNew) return byNew;
+	// Try exact match on old side
+	for (const hunk of hunks) {
+		for (let i = 0; i < hunk.changes.length; i++) {
+			const change = hunk.changes[i];
+			const oldLine = change.type === "normal" ? change.oldLineNumber : change.type === "delete" ? change.lineNumber : null;
+			if (oldLine === line) {
+				return { hunk, index: i };
+			}
+		}
+	}
+	// Fall back to nearest change by new-side line number
+	let best: { hunk: HunkData; index: number; dist: number } | null = null;
+	for (const hunk of hunks) {
+		for (let i = 0; i < hunk.changes.length; i++) {
+			const change = hunk.changes[i];
+			const newLine = change.type === "normal" ? change.newLineNumber : change.type === "insert" ? change.lineNumber : null;
+			if (newLine !== null) {
+				const dist = Math.abs(newLine - line);
+				if (!best || dist < best.dist) best = { hunk, index: i, dist };
+			}
+		}
+	}
+	return best ? { hunk: best.hunk, index: best.index } : null;
+}
+
+/** Build "normal" change entries from raw file lines for expanding context.
+ *  `newStart` is the 1-based line in the new file (used for content + newLineNumber).
+ *  `oldStart` is the 1-based line on the old side (may differ due to insertions/deletions). */
+function buildNormalChanges(lines: string[], newStart: number, count: number, oldStart?: number): ChangeData[] {
 	const changes: ChangeData[] = [];
+	const oldBase = oldStart ?? newStart;
 	for (let i = 0; i < count; i++) {
-		const lineNum = startLine + i;
-		if (lineNum < 1 || lineNum > lines.length) continue;
+		const newLine = newStart + i;
+		const oldLine = oldBase + i;
+		if (newLine < 1 || newLine > lines.length) continue;
 		changes.push({
 			type: "normal",
 			isNormal: true,
-			oldLineNumber: lineNum,
-			newLineNumber: lineNum,
-			content: lines[lineNum - 1] ?? "",
+			oldLineNumber: oldLine,
+			newLineNumber: newLine,
+			content: lines[newLine - 1] ?? "",
 		} as ChangeData);
 	}
 	return changes;
@@ -155,12 +194,16 @@ const FileDiff = memo(function FileDiff({
 	file,
 	viewType,
 	comments,
+	githubComments,
 	activeCommentLocation,
 	onGutterClick,
 	onSubmitComment,
 	onCancelComment,
 	onResolveComment,
 	onDeleteComment,
+	onReplyComment,
+	onReplyGitHubComment,
+	onResolveGitHubThread,
 	isViewed,
 	onToggleViewed,
 	sessionId,
@@ -169,12 +212,16 @@ const FileDiff = memo(function FileDiff({
 	file: FileData;
 	viewType: ViewType;
 	comments: ReviewComment[];
+	githubComments?: GitHubReviewComment[];
 	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
 	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
+	onReplyComment?: (parentId: string, content: string) => void;
+	onReplyGitHubComment?: (threadId: string, content: string) => void;
+	onResolveGitHubThread?: (threadId: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
@@ -209,19 +256,31 @@ const FileDiff = memo(function FileDiff({
 			const hunks = prev.map((h) => ({ ...h, changes: [...h.changes] }));
 			const hunk = hunks[hunkIndex];
 			const firstChange = hunk.changes[0];
-			const firstLine = firstChange?.type === "normal" ? firstChange.oldLineNumber
+			// Get both old and new line numbers for the first change in this hunk
+			const firstOld = firstChange?.type === "normal" ? firstChange.oldLineNumber
 				: firstChange?.type === "delete" ? firstChange.lineNumber : 1;
+			const firstNew = firstChange?.type === "normal" ? firstChange.newLineNumber
+				: firstChange?.type === "insert" ? firstChange.lineNumber : 1;
+
 			const prevHunk = hunkIndex > 0 ? hunks[hunkIndex - 1] : null;
 			const prevLastChange = prevHunk?.changes[prevHunk.changes.length - 1];
-			const prevLastLine = prevLastChange?.type === "normal" ? prevLastChange.oldLineNumber
+			const prevLastOld = prevLastChange?.type === "normal" ? prevLastChange.oldLineNumber
 				: prevLastChange?.type === "insert" ? prevLastChange.lineNumber : 0;
-			const gapStart = prevLastLine + 1;
-			const gapEnd = firstLine - 1;
-			const expandFrom = Math.max(gapStart, gapEnd - EXPAND_STEP + 1);
-			const newChanges = buildNormalChanges(lines, expandFrom, gapEnd - expandFrom + 1);
+			const prevLastNew = prevLastChange?.type === "normal" ? prevLastChange.newLineNumber
+				: prevLastChange?.type === "insert" ? prevLastChange.lineNumber : 0;
+
+			const gapOldStart = prevLastOld + 1;
+			const gapNewStart = prevLastNew + 1;
+			const gapOldEnd = firstOld - 1;
+			const gapNewEnd = firstNew - 1;
+			const count = gapNewEnd - gapNewStart + 1;
+			const expandCount = Math.min(count, EXPAND_STEP);
+			// Expand from the bottom of the gap (closest to the hunk)
+			const skipCount = count - expandCount;
+			const newChanges = buildNormalChanges(lines, gapNewStart + skipCount, expandCount, gapOldStart + skipCount);
 			hunk.changes = [...newChanges, ...hunk.changes];
-			hunk.oldStart = expandFrom;
-			hunk.newStart = expandFrom;
+			hunk.oldStart = gapOldStart + skipCount;
+			hunk.newStart = gapNewStart + skipCount;
 			return hunks;
 		});
 	}, [fetchFileLines]);
@@ -233,28 +292,53 @@ const FileDiff = memo(function FileDiff({
 			const hunks = prev.map((h) => ({ ...h, changes: [...h.changes] }));
 			const hunk = hunks[hunkIndex];
 			const lastChange = hunk.changes[hunk.changes.length - 1];
-			const lastLine = lastChange?.type === "normal" ? lastChange.oldLineNumber
+			// Get both old and new line numbers for the last change in this hunk
+			const lastOld = lastChange?.type === "normal" ? lastChange.oldLineNumber
 				: lastChange?.type === "insert" ? lastChange.lineNumber : 0;
+			const lastNew = lastChange?.type === "normal" ? lastChange.newLineNumber
+				: lastChange?.type === "insert" ? lastChange.lineNumber : 0;
+
 			const nextHunk = hunkIndex < hunks.length - 1 ? hunks[hunkIndex + 1] : null;
 			const nextFirstChange = nextHunk?.changes[0];
-			const nextFirstLine = nextFirstChange?.type === "normal" ? nextFirstChange.oldLineNumber
+			const nextFirstNew = nextFirstChange?.type === "normal" ? nextFirstChange.newLineNumber
 				: nextFirstChange?.type === "delete" ? nextFirstChange.lineNumber : lines.length + 1;
-			const gapStart = lastLine + 1;
-			const gapEnd = Math.min(nextFirstLine - 1, lines.length);
-			const expandTo = Math.min(gapEnd, gapStart + EXPAND_STEP - 1);
-			const newChanges = buildNormalChanges(lines, gapStart, expandTo - gapStart + 1);
+
+			const gapOldStart = lastOld + 1;
+			const gapNewStart = lastNew + 1;
+			const gapNewEnd = Math.min(nextFirstNew - 1, lines.length);
+			const expandCount = Math.min(gapNewEnd - gapNewStart + 1, EXPAND_STEP);
+			const newChanges = buildNormalChanges(lines, gapNewStart, expandCount, gapOldStart);
 			hunk.changes = [...hunk.changes, ...newChanges];
 			return hunks;
 		});
 	}, [fetchFileLines]);
-	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath), [comments, filePath]);
+	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath && !c.githubThreadId), [comments, filePath]);
+	// Local comments linked to GitHub threads (pending/processing replies)
+	const ghThreadReplies = useMemo(() => {
+		const map = new Map<string, ReviewComment[]>();
+		for (const c of comments) {
+			if (c.githubThreadId) {
+				const arr = map.get(c.githubThreadId) ?? [];
+				arr.push(c);
+				map.set(c.githubThreadId, arr);
+			}
+		}
+		return map;
+	}, [comments]);
+	const oldPath = file.oldPath;
+	const fileName = filePath.split("/").pop() ?? "";
+	const fileGitHubComments = useMemo(() => (githubComments ?? []).filter((c) => {
+		if (c.path === filePath || c.path === oldPath) return true;
+		// Fall back to filename match for moved/renamed files
+		return fileName !== "" && c.path.endsWith("/" + fileName);
+	}), [githubComments, filePath, oldPath, fileName]);
 	const fileRef = useRef<HTMLDivElement>(null);
 
 	// Build widgets map: changeKey → ReactNode for inline comments
 	const widgets = useMemo(() => {
 		const w: Record<string, React.ReactNode> = {};
 
-		// Group comments by their widget line (endLine for ranges, line for single-line)
+		// Group local comments by their widget line (endLine for ranges, line for single-line)
 		const commentsByWidgetLine = new Map<number, ReviewComment[]>();
 		for (const c of fileComments) {
 			const widgetLine = c.endLine ?? c.line;
@@ -263,29 +347,69 @@ const FileDiff = memo(function FileDiff({
 			commentsByWidgetLine.set(widgetLine, existing);
 		}
 
-		// For each widget line, find the corresponding change and add a widget
+		// Map change keys to GitHub comments (search by new or old line)
+		const ghByKey = new Map<string, GitHubReviewComment[]>();
+		for (const gc of fileGitHubComments) {
+			const result = findChangeByAnyLine(expandedHunks, gc.line);
+			if (result) {
+				const key = getChangeKey(result.hunk.changes[result.index]);
+				const existing = ghByKey.get(key) ?? [];
+				existing.push(gc);
+				ghByKey.set(key, existing);
+			}
+		}
+
+		// Build widgets for local comments
+		const usedKeys = new Set<string>();
 		for (const [widgetLine, lineComments] of commentsByWidgetLine) {
 			const result = findChangeIndexByNewLine(expandedHunks, widgetLine);
 			if (result) {
 				const key = getChangeKey(result.hunk.changes[result.index]);
+				usedKeys.add(key);
+				const lineGhComments = ghByKey.get(key);
 				const isAdding = activeCommentLocation?.filePath === filePath && activeCommentLocation?.endLine === widgetLine;
 				w[key] = (
 					<CommentThread
 						comments={lineComments}
+						githubComments={lineGhComments}
+						ghThreadReplies={ghThreadReplies}
 						isAddingComment={isAdding}
 						onSubmitComment={onSubmitComment}
 						onCancelComment={onCancelComment}
 						onResolveComment={onResolveComment}
 						onDeleteComment={onDeleteComment}
+						onReplyComment={onReplyComment}
+						onReplyGitHubComment={onReplyGitHubComment}
+						onResolveGitHubThread={onResolveGitHubThread}
 					/>
 				);
 			}
 		}
 
+		// Build widgets for GitHub-only comments (no local comments on same line)
+		for (const [key, ghComments] of ghByKey) {
+			if (usedKeys.has(key)) continue;
+			w[key] = (
+				<CommentThread
+					comments={[]}
+					githubComments={ghComments}
+					ghThreadReplies={ghThreadReplies}
+					isAddingComment={false}
+					onSubmitComment={onSubmitComment}
+					onCancelComment={onCancelComment}
+					onReplyGitHubComment={onReplyGitHubComment}
+					onResolveGitHubThread={onResolveGitHubThread}
+				/>
+			);
+		}
+
 		// Handle the case where we're adding a new comment on a line that has no comments yet
 		if (activeCommentLocation?.filePath === filePath) {
 			const widgetLine = activeCommentLocation.endLine;
-			const hasExistingWidget = fileComments.some((c) => (c.endLine ?? c.line) === widgetLine);
+			const hasExistingWidget = commentsByWidgetLine.has(widgetLine) || (() => {
+				const r = findChangeIndexByNewLine(expandedHunks, widgetLine);
+				return r ? usedKeys.has(getChangeKey(r.hunk.changes[r.index])) || ghByKey.has(getChangeKey(r.hunk.changes[r.index])) : false;
+			})();
 			if (!hasExistingWidget) {
 				const result = findChangeIndexByNewLine(expandedHunks, widgetLine);
 				if (result) {
@@ -303,7 +427,7 @@ const FileDiff = memo(function FileDiff({
 		}
 
 		return w;
-	}, [fileComments, activeCommentLocation, filePath, expandedHunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment]);
+	}, [fileComments, fileGitHubComments, activeCommentLocation, filePath, expandedHunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment, onReplyComment, onReplyGitHubComment, onResolveGitHubThread]);
 
 	const handleLineClick = useCallback(
 		(newLine: number, shiftKey: boolean) => {
@@ -347,6 +471,7 @@ const FileDiff = memo(function FileDiff({
 					<span
 						className="cursor-pointer hover:bg-violet-500/20 rounded px-0.5"
 						title="Click to comment · Shift+click to select range"
+						data-comment-line={newLine ?? undefined}
 						onClick={(e) => {
 							e.stopPropagation();
 							if (newLine !== null) handleLineClick(newLine, e.shiftKey);
@@ -360,6 +485,19 @@ const FileDiff = memo(function FileDiff({
 		},
 		[viewType, handleLineClick],
 	);
+
+	// Delegate clicks on the gutter <td> to trigger comments even when clicking
+	// outside the line number text itself.
+	const handleGutterCellClick = useCallback((e: React.MouseEvent) => {
+		const td = (e.target as HTMLElement).closest("td.diff-gutter");
+		if (!td) return;
+		// Don't double-fire if the click was already on the inner span
+		const span = td.querySelector("[data-comment-line]") as HTMLElement | null;
+		if (!span) return;
+		if (span.contains(e.target as Node)) return;
+		const line = Number(span.dataset.commentLine);
+		if (!Number.isNaN(line)) handleLineClick(line, e.shiftKey);
+	}, [handleLineClick]);
 
 	return (
 		<div ref={fileRef} id={`file-${filePath}`} className="mb-4 mx-4 first:mt-3">
@@ -402,7 +540,7 @@ const FileDiff = memo(function FileDiff({
 			</div>
 
 			{/* Diff content — collapse when viewed */}
-			{!isViewed && <div className="border border-t-0 border-[#21262d] rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }}>
+			{!isViewed && <div className="border border-t-0 border-[#21262d] rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }} onClick={handleGutterCellClick}>
 				{expandedHunks.length > 0 ? (
 					<Diff
 						viewType={viewType}
@@ -490,12 +628,16 @@ function LazyFileDiff(props: {
 	file: FileData;
 	viewType: ViewType;
 	comments: ReviewComment[];
+	githubComments?: GitHubReviewComment[];
 	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
 	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
+	onReplyComment?: (parentId: string, content: string) => void;
+	onReplyGitHubComment?: (threadId: string, content: string) => void;
+	onResolveGitHubThread?: (threadId: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
@@ -509,15 +651,33 @@ function LazyFileDiff(props: {
 		if (!el) return;
 		const observer = new IntersectionObserver(
 			([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
-			{ rootMargin: "200px" },
+			{ rootMargin: "800px" },
 		);
 		observer.observe(el);
 		return () => observer.disconnect();
 	}, []);
 
 	if (!visible) {
+		const filePath = props.file.newPath === "/dev/null" ? props.file.oldPath : props.file.newPath;
 		const lineCount = props.file.hunks.reduce((n, h) => n + h.changes.length, 0);
-		return <div ref={ref} style={{ minHeight: Math.max(60, lineCount * 20) }} className="mb-4 mx-4" />;
+		return (
+			<div ref={ref} style={{ minHeight: Math.max(60, lineCount * 20) }} className="mb-4 mx-4">
+				<div className="px-3 py-1.5 bg-[#161b22] border border-[#21262d] rounded-t-lg flex items-center gap-2">
+					<span className={`text-[10px] font-bold shrink-0 ${
+						props.file.type === "add" ? "text-emerald-400" : props.file.type === "delete" ? "text-red-400" : "text-amber-400"
+					}`}>
+						{props.file.type === "add" ? "NEW" : props.file.type === "delete" ? "DEL" : "MOD"}
+					</span>
+					<span className="text-xs text-zinc-500 font-mono truncate">{filePath}</span>
+				</div>
+				<div className="border border-t-0 border-[#21262d] rounded-b-lg px-3 py-2">
+					<div className="flex items-center gap-2 text-zinc-700 text-xs">
+						<span className="w-3.5 h-3.5 rounded-full border-2 border-zinc-800 border-t-zinc-600 animate-spin" />
+						Loading diff…
+					</div>
+				</div>
+			</div>
+		);
 	}
 
 	return <FileDiff {...props} />;
@@ -538,6 +698,11 @@ export const DiffViewer = memo(function DiffViewer({
 	onToggleViewed,
 	sessionId,
 	onOpenInEditor,
+	isLoading,
+	onReplyComment,
+	githubComments,
+	onReplyGitHubComment,
+	onResolveGitHubThread,
 }: DiffViewerProps) {
 	const files = useMemo(() => {
 		if (!rawDiff) return [];
@@ -550,6 +715,28 @@ export const DiffViewer = memo(function DiffViewer({
 	}, [rawDiff]);
 
 	if (files.length === 0) {
+		if (isLoading) {
+			return (
+				<div className="flex-1 overflow-y-auto">
+					{Array.from({ length: 5 }).map((_, i) => (
+						<div key={i} className="mb-4 mx-4 first:mt-3 animate-pulse">
+							<div className="px-3 py-1.5 bg-[#161b22] border border-[#21262d] rounded-t-lg flex items-center gap-2">
+								<div className="w-7 h-3.5 rounded bg-zinc-800/80" />
+								<div className="h-3.5 rounded bg-zinc-800/50 flex-1" style={{ maxWidth: `${30 + (i * 23) % 50}%` }} />
+							</div>
+							<div className="border border-t-0 border-[#21262d] rounded-b-lg p-3 space-y-2">
+								{Array.from({ length: 3 + (i % 3) }).map((_, j) => (
+									<div key={j} className="flex gap-2">
+										<div className="w-8 h-3.5 rounded bg-zinc-800/30 shrink-0" />
+										<div className="h-3.5 rounded bg-zinc-800/20 flex-1" style={{ maxWidth: `${40 + (j * 31) % 55}%` }} />
+									</div>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			);
+		}
 		return (
 			<div className="flex-1 flex items-center justify-center text-zinc-600 text-sm">
 				No changes to review
@@ -568,12 +755,16 @@ export const DiffViewer = memo(function DiffViewer({
 					file={file}
 					viewType={viewType}
 					comments={comments}
+					githubComments={githubComments}
 					activeCommentLocation={activeCommentLocation}
 					onGutterClick={onGutterClick}
 					onSubmitComment={onSubmitComment}
 					onCancelComment={onCancelComment}
 					onResolveComment={onResolveComment}
 					onDeleteComment={onDeleteComment}
+					onReplyComment={onReplyComment}
+					onReplyGitHubComment={onReplyGitHubComment}
+					onResolveGitHubThread={onResolveGitHubThread}
 					isViewed={isViewed?.(selectedFile) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(selectedFile!) : undefined}
 					sessionId={sessionId}
@@ -594,12 +785,16 @@ export const DiffViewer = memo(function DiffViewer({
 					file={file}
 					viewType={viewType}
 					comments={comments}
+					githubComments={githubComments}
 					activeCommentLocation={activeCommentLocation}
 					onGutterClick={onGutterClick}
 					onSubmitComment={onSubmitComment}
 					onCancelComment={onCancelComment}
 					onResolveComment={onResolveComment}
 					onDeleteComment={onDeleteComment}
+					onReplyComment={onReplyComment}
+					onReplyGitHubComment={onReplyGitHubComment}
+					onResolveGitHubThread={onResolveGitHubThread}
 					isViewed={isViewed?.(fp) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(fp) : undefined}
 					sessionId={sessionId}

@@ -1,8 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { refreshAfterAction } from "@/lib/actions";
 import { ClaudeSession, PrStatus, SessionStatus } from "@/lib/types";
+
+const COLLAPSED_KEY = "claude-control:collapsed-cards";
+
+function getCollapsedCards(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]"));
+  } catch { return new Set(); }
+}
+
+function persistCollapsedCards(ids: Set<string>) {
+  localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]));
+}
 import { GitSummary } from "./GitSummary";
 import { OutputPreview } from "./OutputPreview";
 import { PrStatusBadge } from "./PrStatusBadge";
@@ -68,6 +80,7 @@ export function SessionCard({
   onOpenTerminal,
   hasActiveTerminal,
   hasInlineTerminal,
+  onKill,
 }: {
   session: ClaudeSession;
   targetScreen?: number | null;
@@ -86,12 +99,34 @@ export function SessionCard({
   onOpenTerminal?: () => void;
   hasActiveTerminal?: boolean;
   hasInlineTerminal?: boolean;
+  onKill?: () => void;
 }) {
   const isSuppressed = !!actedOn;
   const showQuickReply = session.status === "waiting" && session.pid && !isSuppressed;
   const displayStatus = isSuppressed ? (actedOn!.action === "reject" ? "idle" : "working") : session.status;
   const styles = cardStyles[displayStatus];
   const [cleanupState, setCleanupState] = useState<"idle" | "confirm" | "cleaning" | "done">("idle");
+  const [collapsed, setCollapsed] = useState(() => getCollapsedCards().has(session.id));
+
+  // Auto-expand when session needs user input
+  useEffect(() => {
+    if (session.status === "waiting" && collapsed) {
+      setCollapsed(false);
+      const ids = getCollapsedCards();
+      ids.delete(session.id);
+      persistCollapsedCards(ids);
+    }
+  }, [session.status, session.id, collapsed]);
+
+  const toggleCollapse = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = !collapsed;
+    setCollapsed(next);
+    const ids = getCollapsedCards();
+    if (next) ids.add(session.id);
+    else ids.delete(session.id);
+    persistCollapsedCards(ids);
+  };
 
   const canCleanup =
     session.isWorktree && (displayStatus === "idle" || displayStatus === "waiting" || displayStatus === "finished");
@@ -219,64 +254,80 @@ export function SessionCard({
                 {session.workingDirectory.replace(/.*\/([^/]+\/[^/]+)$/, "$1")}
               </p>
             </div>
+            <button
+              onClick={toggleCollapse}
+              className="shrink-0 p-1 text-zinc-600 hover:text-zinc-300 transition-colors ml-1"
+              title={collapsed ? "Expand card" : "Collapse card"}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                {collapsed
+                  ? <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  : <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                }
+              </svg>
+            </button>
             <StatusBadge status={displayStatus} orphaned={session.orphaned} />
           </div>
 
-          {/* Git info + PR status */}
+          {/* Git info + PR status — always visible */}
           {(session.git || prStatus) && (
             <div className="mb-3 flex items-center gap-2 flex-wrap">
-              {session.git && <GitSummary git={session.git} />}
+              {session.git && <GitSummary git={session.git} hideBranch={collapsed} />}
               {prStatus && <PrStatusBadge pr={prStatus} />}
             </div>
           )}
 
-          {/* Divider */}
-          <div className="h-px bg-white/4 mb-3" />
+          {!collapsed && (
+            <>
+              {/* Divider */}
+              <div className="h-px bg-white/4 mb-3" />
 
-          {/* Task summary or output preview */}
-          <div className="mb-4 h-24 overflow-hidden">
-            {editing ? (
-              <TaskSummaryView
-                task={
-                  session.taskSummary ?? {
-                    title: "",
-                    description: null,
-                    source: "user",
-                    ticketId: null,
-                    ticketUrl: null,
-                  }
-                }
-                editing
-                onSave={onSaveMeta}
-                onCancel={onCancelEdit}
-              />
-            ) : session.taskSummary ? (
-              <TaskSummaryView task={session.taskSummary} onStartEdit={onStartEdit} />
-            ) : (
-              <OutputPreview preview={session.preview} status={session.status} />
-            )}
-          </div>
+              {/* Task summary or output preview */}
+              <div className="mb-4 h-24 overflow-hidden">
+                {editing ? (
+                  <TaskSummaryView
+                    task={
+                      session.taskSummary ?? {
+                        title: "",
+                        description: null,
+                        source: "user",
+                        ticketId: null,
+                        ticketUrl: null,
+                      }
+                    }
+                    editing
+                    onSave={onSaveMeta}
+                    onCancel={onCancelEdit}
+                  />
+                ) : session.taskSummary ? (
+                  <TaskSummaryView task={session.taskSummary} onStartEdit={onStartEdit} />
+                ) : (
+                  <OutputPreview preview={session.preview} status={session.status} />
+                )}
+              </div>
 
-          {/* Quick reply for waiting sessions */}
-          {showQuickReply && (
-            <QuickReply
-              pid={session.pid!}
-              path={session.workingDirectory}
-              lastAssistantText={session.preview.lastAssistantText}
-              lastTools={session.preview.lastTools}
-              hasPendingToolUse={session.hasPendingToolUse}
-              onActed={(action) => {
-                if (action !== "reply") onApproveReject?.(action);
-              }}
-            />
+              {/* Quick reply for waiting sessions */}
+              {showQuickReply && (
+                <QuickReply
+                  pid={session.pid!}
+                  path={session.workingDirectory}
+                  lastAssistantText={session.preview.lastAssistantText}
+                  lastTools={session.preview.lastTools}
+                  hasPendingToolUse={session.hasPendingToolUse}
+                  onActed={(action) => {
+                    if (action !== "reply") onApproveReject?.(action);
+                  }}
+                />
+              )}
+
+              {/* Time ago */}
+              <div className="mb-3 mt-3">
+                <span className="text-[11px] text-zinc-600 font-(family-name:--font-geist-mono)">
+                  {timeAgo(session.lastActivity)}
+                </span>
+              </div>
+            </>
           )}
-
-          {/* Time ago */}
-          <div className="mb-3 mt-3">
-            <span className="text-[11px] text-zinc-600 font-(family-name:--font-geist-mono)">
-              {timeAgo(session.lastActivity)}
-            </span>
-          </div>
 
           {/* Confirmation bar — slides in over the actions */}
           {cleanupState === "confirm" ? (
@@ -317,6 +368,7 @@ export function SessionCard({
               sessionId={session.id}
               sessionName={session.repoName || session.workingDirectory.split("/").pop() || session.id}
               hasChanges={!!session.git && (session.git.changedFiles > 0 || session.git.additions > 0 || session.git.untrackedFiles > 0)}
+              onKill={onKill}
             />
           )}
         </div>

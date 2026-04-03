@@ -222,8 +222,8 @@ body {
   border-right: 1px solid #21262d;
   cursor: pointer;
   user-select: none;
-  min-width: 40px;
-  padding: 0 8px;
+  min-width: 32px;
+  padding: 0 5px;
   text-align: right;
 }
 .diff-viewer-container .diff-gutter:hover {

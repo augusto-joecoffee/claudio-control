@@ -1,8 +1,9 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { memo, useCallback, useMemo, useRef, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ViewType } from "react-diff-view";
+import { useSession } from "@/hooks/useSession";
 import { useReview } from "@/hooks/useReview";
 import { useReviewDiff } from "@/hooks/useReviewDiff";
 import { useReviewQueue } from "@/hooks/useReviewQueue";
@@ -10,6 +11,7 @@ import { useReviewCommits } from "@/hooks/useReviewCommits";
 import { useReviewBranches } from "@/hooks/useReviewBranches";
 import { useViewedFiles } from "@/hooks/useViewedFiles";
 import { useAutoRefreshDiff } from "@/hooks/useAutoRefreshDiff";
+import { useGitHubComments } from "@/hooks/useGitHubComments";
 import { DiffViewer, parseDiff, getFilePath } from "@/components/review/DiffViewer";
 import { FileTree } from "@/components/review/FileTree";
 import { CommentQueue } from "@/components/review/CommentQueue";
@@ -19,11 +21,34 @@ export default function ReviewPage() {
 	const params = useParams();
 	const sessionId = typeof params.sessionId === "string" ? decodeURIComponent(params.sessionId) : "";
 
+	// Close the review window when the session disappears (killed or exited)
+	const { error: sessionError } = useSession(sessionId);
+	const sessionGoneCount = useRef(0);
+	useEffect(() => {
+		if (!sessionId) return;
+		if (!sessionError) {
+			sessionGoneCount.current = 0;
+			return;
+		}
+		// Session returned an error (404) — count consecutive failures
+		sessionGoneCount.current++;
+		if (sessionGoneCount.current >= 2) {
+			const api = (window as unknown as { electronAPI?: { closeReviewWindow: (id: string) => Promise<void> } }).electronAPI;
+			if (api?.closeReviewWindow) {
+				api.closeReviewWindow(sessionId);
+			} else {
+				window.close();
+			}
+		}
+	}, [sessionId, sessionError]);
+
 	const { review, comments, addComment, refresh: refreshReview } = useReview(sessionId);
 	const [selectedCommit, setSelectedCommit] = useState("all");
 	const { diff, isLoading: diffLoading, refreshDiff, uncommittedFiles } = useReviewDiff(sessionId, selectedCommit);
 	const { commits } = useReviewCommits(sessionId);
 	const { branches } = useReviewBranches(sessionId);
+
+	const { comments: githubComments, refresh: refreshGitHubComments, replyToThread, resolveThread } = useGitHubComments(sessionId, review?.prUrl);
 
 	const [paused, setPaused] = useState(false);
 	const [viewType, setViewType] = useState<ViewType>("split");
@@ -31,6 +56,7 @@ export default function ReviewPage() {
 	const [activeComment, setActiveComment] = useState<{ filePath: string; startLine: number; endLine: number } | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
+	const [showGitHubComments, setShowGitHubComments] = useState(true);
 
 	const pendingSnippetRef = useRef("");
 
@@ -45,12 +71,26 @@ export default function ReviewPage() {
 	const handleCommentResolved = useCallback(() => {
 		refreshReview();
 		handleRefreshDiff();
-	}, [refreshReview, handleRefreshDiff]);
+		// Refresh GitHub comments — a reply to a GitHub thread may have been posted
+		if (review?.prUrl) {
+			fetch(`/api/review/${encodeURIComponent(sessionId)}/github-comments?fresh=1`)
+				.then((r) => r.json())
+				.then((data) => refreshGitHubComments(data, { revalidate: false }))
+				.catch(() => {});
+		}
+	}, [refreshReview, handleRefreshDiff, review?.prUrl, sessionId, refreshGitHubComments]);
 
 	const { processingId, pendingCount, completedCount, sessionStatus, refresh: refreshQueue } = useReviewQueue(sessionId, {
 		paused,
 		onCommentResolved: handleCommentResolved,
 	});
+
+	// Refresh review data when a comment starts processing so the status
+	// badge updates from "Pending" to "Processing" without waiting for the
+	// next SWR revalidation cycle.
+	useEffect(() => {
+		if (processingId) refreshReview();
+	}, [processingId, refreshReview]);
 
 	const files = useMemo(() => {
 		if (!diff) return [];
@@ -68,10 +108,32 @@ export default function ReviewPage() {
 	const commentCounts = useMemo(() => {
 		const counts: Record<string, number> = {};
 		for (const c of comments) {
+			if (c.githubThreadId) continue; // GitHub thread replies are shown in the GitHub comment, not separately
 			counts[c.filePath] = (counts[c.filePath] ?? 0) + 1;
 		}
 		return counts;
 	}, [comments]);
+
+	const githubCommentFiles = useMemo(() => {
+		// Build lookup: oldPath → newPath for renames, plus filename → newPath for moved files
+		const oldToNew = new Map<string, string>();
+		const nameToNew = new Map<string, string>();
+		for (const f of files) {
+			const newPath = f.newPath === "/dev/null" ? f.oldPath : f.newPath;
+			if (f.oldPath && f.oldPath !== f.newPath && f.oldPath !== "/dev/null") {
+				oldToNew.set(f.oldPath, newPath);
+			}
+			const name = newPath.split("/").pop() ?? "";
+			if (name) nameToNew.set(name, newPath);
+		}
+		const result = new Set<string>();
+		for (const c of githubComments) {
+			// Try exact path, then old→new rename, then match by filename
+			const fileName = c.path.split("/").pop() ?? "";
+			result.add(oldToNew.get(c.path) ?? nameToNew.get(fileName) ?? c.path);
+		}
+		return result;
+	}, [githubComments, files]);
 
 	const handleGutterClick = useCallback((filePath: string, startLine: number, endLine: number, anchorSnippet: string) => {
 		setActiveComment((prev) => {
@@ -96,6 +158,55 @@ export default function ReviewPage() {
 	const handleCancelComment = useCallback(() => {
 		setActiveComment(null);
 	}, []);
+
+	const handleReplyComment = useCallback(
+		async (parentId: string, content: string) => {
+			// Find the parent comment to get its file/line context
+			const parent = comments.find((c) => c.id === parentId);
+			if (!parent) return;
+			await addComment(parent.filePath, parent.line, content, parent.anchorSnippet, parent.endLine, parentId);
+			refreshQueue();
+		},
+		[comments, addComment, refreshQueue],
+	);
+
+	const handleReplyGitHubComment = useCallback(
+		async (threadId: string, content: string) => {
+			// Find the GitHub comment to get file/line context
+			const ghComment = githubComments.find((c) => c.threadId === threadId);
+			if (!ghComment) return;
+
+			// Optimistic update — show the reply in the GitHub thread immediately
+			refreshGitHubComments(
+				(current) => {
+					if (!current) return current;
+					return {
+						comments: current.comments.map((c) =>
+							c.threadId === threadId
+								? { ...c, replies: [...c.replies, { id: `optimistic-${Date.now()}`, author: "you", body: content, createdAt: new Date().toISOString() }] }
+								: c,
+						),
+					};
+				},
+				{ revalidate: false },
+			);
+
+			// Store the GitHub comment body + author as anchorSnippet so the queue
+			// can include it in the prompt for Claude
+			const ghContext = `@${ghComment.author}: ${ghComment.body}\n\nGitHub URL: ${ghComment.url}`;
+			await addComment(ghComment.path, ghComment.line, content, ghContext, undefined, undefined, threadId);
+			refreshQueue();
+		},
+		[githubComments, addComment, refreshQueue, refreshGitHubComments],
+	);
+
+	const handleResolveGitHubThread = useCallback(
+		async (threadId: string) => {
+			await resolveThread(threadId);
+			refreshGitHubComments();
+		},
+		[resolveThread, refreshGitHubComments],
+	);
 
 	const handleCommentAction = useCallback(
 		async (commentId: string, action: "resolve" | "delete") => {
@@ -176,6 +287,10 @@ export default function ReviewPage() {
 				commits={commits}
 				selectedCommit={selectedCommit}
 				onSelectCommit={handleSelectCommit}
+				hasPrComments={githubComments.length > 0}
+				showGitHubComments={showGitHubComments}
+				onToggleGitHubComments={() => setShowGitHubComments((v) => !v)}
+				gitHubCommentCount={githubComments.length}
 			/>
 
 			{/* Main content */}
@@ -194,6 +309,8 @@ export default function ReviewPage() {
 							viewedCount={viewedCount}
 							totalFiles={files.length}
 							uncommittedFiles={uncommittedSet}
+							isLoading={diffLoading}
+							githubCommentFiles={showGitHubComments ? githubCommentFiles : undefined}
 						/>
 					</div>
 				) : (
@@ -209,31 +326,27 @@ export default function ReviewPage() {
 				)}
 
 				{/* Diff viewer */}
-				{diffLoading ? (
-					<div className="flex-1 flex items-center justify-center text-zinc-600">
-						<span className="flex items-center gap-2">
-							<span className="w-4 h-4 rounded-full border-2 border-zinc-700 border-t-zinc-400 animate-spin" />
-							Loading diff...
-						</span>
-					</div>
-				) : (
-					<DiffViewer
-						rawDiff={diff}
-						viewType={viewType}
-						comments={comments}
-						activeCommentLocation={activeComment}
-						onGutterClick={handleGutterClick}
-						onSubmitComment={handleSubmitComment}
-						onCancelComment={handleCancelComment}
-						onResolveComment={handleResolveComment}
-						onDeleteComment={handleDeleteComment}
-						selectedFile={selectedFile}
-						isViewed={isViewed}
-						onToggleViewed={toggleViewed}
-						sessionId={sessionId}
-						onOpenInEditor={handleOpenInEditor}
-					/>
-				)}
+				<DiffViewer
+					rawDiff={diff}
+					viewType={viewType}
+					comments={comments}
+					githubComments={showGitHubComments ? githubComments : undefined}
+					activeCommentLocation={activeComment}
+					onGutterClick={handleGutterClick}
+					onSubmitComment={handleSubmitComment}
+					onCancelComment={handleCancelComment}
+					onResolveComment={handleResolveComment}
+					onDeleteComment={handleDeleteComment}
+					onReplyComment={handleReplyComment}
+					onReplyGitHubComment={handleReplyGitHubComment}
+					onResolveGitHubThread={handleResolveGitHubThread}
+					selectedFile={selectedFile}
+					isViewed={isViewed}
+					onToggleViewed={toggleViewed}
+					sessionId={sessionId}
+					onOpenInEditor={handleOpenInEditor}
+					isLoading={diffLoading}
+				/>
 			</div>
 
 			{/* Bottom queue bar */}

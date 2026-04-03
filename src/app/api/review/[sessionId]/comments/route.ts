@@ -24,12 +24,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
 	}
 
 	const body = await request.json();
-	const { filePath, line, content, anchorSnippet, endLine } = body as {
+	const { filePath, line, content, anchorSnippet, endLine, parentId, githubThreadId } = body as {
 		filePath: string;
 		line: number;
 		content: string;
 		anchorSnippet: string;
 		endLine?: number;
+		parentId?: string;
+		githubThreadId?: string;
 	};
 
 	if (!filePath || !line || !content) {
@@ -48,6 +50,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
 		createdAt: new Date().toISOString(),
 		resolvedAt: null,
 		response: null,
+		parentId: parentId ?? undefined,
+		githubThreadId: githubThreadId ?? undefined,
 	};
 
 	review.comments.push(comment);

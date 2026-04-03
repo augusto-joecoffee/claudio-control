@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Code Review
   openReviewWindow: (sessionId, sessionName) =>
     ipcRenderer.invoke("review:openWindow", { sessionId, sessionName }),
+  closeReviewWindow: (sessionId) =>
+    ipcRenderer.invoke("review:closeWindow", { sessionId }),
   isReviewOpen: (sessionId) =>
     ipcRenderer.invoke("review:isOpen", { sessionId }),
 });

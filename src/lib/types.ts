@@ -198,6 +198,34 @@ export interface ReviewComment {
   resolvedAt: string | null;
   /** Claude's response after processing this comment. */
   response: string | null;
+  /** If this is a reply, the ID of the parent comment. */
+  parentId?: string;
+  /** If this comment is a reply to a GitHub PR review thread. */
+  githubThreadId?: string;
+}
+
+export interface GitHubReviewComment {
+  /** GitHub node ID of the comment. */
+  id: string;
+  /** GitHub node ID of the review thread. */
+  threadId: string;
+  /** GitHub username of the author. */
+  author: string;
+  /** Comment body text. */
+  body: string;
+  /** File path relative to repo root. */
+  path: string;
+  /** Line number on the new side of the diff. */
+  line: number;
+  /** Start line for multi-line comments. */
+  startLine?: number;
+  /** Whether the comment is on outdated code. */
+  outdated: boolean;
+  createdAt: string;
+  /** Direct link to the comment on GitHub. */
+  url: string;
+  /** Replies within this thread (excluding the root comment). */
+  replies: { id: string; author: string; body: string; createdAt: string }[];
 }
 
 export interface ReviewSession {
@@ -210,4 +238,6 @@ export interface ReviewSession {
   /** Index of the next comment to send to Claude. */
   queueHead: number;
   createdAt: string;
+  /** GitHub PR URL if this review is for a PR. */
+  prUrl?: string;
 }

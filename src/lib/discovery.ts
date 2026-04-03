@@ -179,7 +179,7 @@ async function buildSession(
 // Discovery result cache — avoids re-running full discovery on rapid polls
 let cachedSessions: ClaudeSession[] = [];
 let cacheTimestamp = 0;
-const CACHE_TTL_MS = 1500;
+const CACHE_TTL_MS = 750;
 
 export function invalidateSessionCache() {
   cacheTimestamp = 0;

@@ -7,12 +7,15 @@ export function groupSessions(sessions: ClaudeSession[], repoIds?: Record<string
 
   for (const session of sessions) {
     const repoPath = session.parentRepo || session.workingDirectory;
+    const repoId = repoIds?.[repoPath];
+    // Group by stable repoId when available, fall back to path
+    const groupKey = repoId || repoPath;
     const repoName = repoPath.split("/").filter(Boolean).pop() || repoPath;
 
-    if (!groups.has(repoPath)) {
-      groups.set(repoPath, { repoId: repoIds?.[repoPath] ?? "", repoName, repoPath, sessions: [] });
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, { repoId: repoId ?? "", repoName, repoPath, sessions: [] });
     }
-    groups.get(repoPath)!.sessions.push(session);
+    groups.get(groupKey)!.sessions.push(session);
   }
 
   return Array.from(groups.values()).sort((a, b) => {
@@ -22,8 +25,8 @@ export function groupSessions(sessions: ClaudeSession[], repoIds?: Record<string
 }
 
 /** Flatten sessions in the same order the grid displays them. */
-export function flattenGroupedSessions(sessions: ClaudeSession[], layout?: DashboardLayout | null): ClaudeSession[] {
-  const groups = groupSessions(sessions);
+export function flattenGroupedSessions(sessions: ClaudeSession[], layout?: DashboardLayout | null, repoIds?: Record<string, string>): ClaudeSession[] {
+  const groups = groupSessions(sessions, repoIds);
   const ordered = layout ? applyLayout(groups, layout) : groups;
   const flat: ClaudeSession[] = [];
   for (const group of ordered) {
