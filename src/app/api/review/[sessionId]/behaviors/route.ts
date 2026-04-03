@@ -69,7 +69,18 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 		}
 	}
 
-	// No cached analysis or fingerprint mismatch → pending
+	// Before returning "pending", check if Claude already responded in the JSONL
+	// (e.g., from a previous analyze attempt whose cache was cleared)
+	const existingResponse = await pollForResponse(sessionId);
+	if (existingResponse) {
+		const analysis = parseClaudeResponse(existingResponse, sessionId, fingerprint, 0);
+		if (analysis.behaviors.length > 0) {
+			await saveBehaviorAnalysis(sessionId, analysis);
+			return NextResponse.json({ ...analysis, status: "complete", stale: false });
+		}
+	}
+
+	// No cached analysis and no JSONL response → pending
 	return NextResponse.json({ status: "pending", stale: false, behaviors: [], orphanedSymbols: [], warnings: [] });
 }
 
