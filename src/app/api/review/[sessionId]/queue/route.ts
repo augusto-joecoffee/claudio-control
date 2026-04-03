@@ -36,64 +36,63 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 	const sessionStatus = session?.status ?? "finished";
 
 	// Try to capture Claude's response for the processing comment.
-	// We attempt this in ALL session states (not just idle/waiting) so we don't
-	// miss the response when the session briefly flickers between states.
-	// However, we only force-unblock (timeout/error) when the session has settled.
+	// Only capture when the session has settled (idle/waiting/errored) so we
+	// don't grab an intermediate "Let me check..." while Claude is still working.
 	if (processing && processing.status === "processing") {
-		let response: string | null = null;
-
-		if (session?.jsonlPath) {
-			try {
-				const lines = await readFullConversation(session.jsonlPath);
-				const conversation = linesToConversation(lines);
-				// Match by unique comment ID first, fall back to file signature
-				const commentTag = `[id:${processing.id}]`;
-				const lineRef = processing.endLine ? `lines ${processing.line}-${processing.endLine}` : `line ${processing.line}`;
-				const fileSignature = `File: ${processing.filePath} (${lineRef})`;
-				const promptIdx = conversation.findLastIndex(
-					(m) => m.type === "user" && (m.text?.includes(commentTag) || m.text?.includes(fileSignature)),
-				);
-				if (promptIdx >= 0) {
-					// Take the LAST assistant text — this matches what the terminal displays.
-					// Earlier assistant messages are intermediate (before tool calls).
-					let lastText: string | null = null;
-					for (let i = promptIdx + 1; i < conversation.length; i++) {
-						const m = conversation[i];
-						if (m.type === "user") break;
-						if (m.type === "assistant" && m.text) lastText = m.text;
-					}
-					if (lastText) response = lastText;
-				}
-			} catch {
-				// ignore — will retry on next poll
-			}
-		}
-
-		// If we found a response, mark as answered regardless of session state
-		if (response) {
-			processing.status = "answered";
-			processing.response = response;
-			await saveReview(sessionId, review);
-
-			// Auto-post reply to GitHub if this was a GitHub thread reply
-			if (processing.githubThreadId && review.workingDirectory) {
-				postReplyToGitHub(processing.githubThreadId, processing.content, response, review.workingDirectory).catch((err) =>
-					console.error("Failed to auto-post GitHub reply:", err),
-				);
-			}
-
-			return NextResponse.json({
-				processingId: null,
-				pendingCount,
-				completedCount: completedCount + 1,
-				sessionStatus,
-				justResolved: processing.id,
-			});
-		}
-
-		// No response found — only force-unblock when session has settled
 		const sessionSettled = sessionStatus === "idle" || sessionStatus === "waiting" || sessionStatus === "errored";
+
 		if (sessionSettled) {
+			let response: string | null = null;
+
+			if (session?.jsonlPath) {
+				try {
+					const lines = await readFullConversation(session.jsonlPath);
+					const conversation = linesToConversation(lines);
+					// Match by unique comment ID first, fall back to file signature
+					const commentTag = `[id:${processing.id}]`;
+					const lineRef = processing.endLine ? `lines ${processing.line}-${processing.endLine}` : `line ${processing.line}`;
+					const fileSignature = `File: ${processing.filePath} (${lineRef})`;
+					const promptIdx = conversation.findLastIndex(
+						(m) => m.type === "user" && (m.text?.includes(commentTag) || m.text?.includes(fileSignature)),
+					);
+					if (promptIdx >= 0) {
+						// Take the LAST assistant text — this matches what the terminal displays.
+						// Earlier assistant messages are intermediate (before tool calls).
+						let lastText: string | null = null;
+						for (let i = promptIdx + 1; i < conversation.length; i++) {
+							const m = conversation[i];
+							if (m.type === "user") break;
+							if (m.type === "assistant" && m.text) lastText = m.text;
+						}
+						if (lastText) response = lastText;
+					}
+				} catch {
+					// ignore — will retry on next poll
+				}
+			}
+
+			if (response) {
+				processing.status = "answered";
+				processing.response = response;
+				await saveReview(sessionId, review);
+
+				// Auto-post reply to GitHub if this was a GitHub thread reply
+				if (processing.githubThreadId && review.workingDirectory) {
+					postReplyToGitHub(processing.githubThreadId, processing.content, response, review.workingDirectory).catch((err) =>
+						console.error("Failed to auto-post GitHub reply:", err),
+					);
+				}
+
+				return NextResponse.json({
+					processingId: null,
+					pendingCount,
+					completedCount: completedCount + 1,
+					sessionStatus,
+					justResolved: processing.id,
+				});
+			}
+
+			// Session settled but no response — force-unblock on error/timeout
 			const processingAge = Date.now() - new Date(processing.createdAt).getTime();
 			if (sessionStatus === "errored" || processingAge > 120_000) {
 				processing.status = "answered";
