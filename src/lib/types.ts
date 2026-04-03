@@ -241,3 +241,109 @@ export interface ReviewSession {
   /** GitHub PR URL if this review is for a PR. */
   prUrl?: string;
 }
+
+// ── Behavior-First Review ──
+
+export type ConfidenceLevel = "high" | "medium" | "low";
+
+export type EntrypointKind =
+  | "api-route"
+  | "event-handler"
+  | "queue-consumer"
+  | "cli-command"
+  | "test-function"
+  | "exported-function"
+  | "cron-job"
+  | "react-component"
+  | "unknown";
+
+export type SideEffectKind =
+  | "db-write"
+  | "db-read"
+  | "http-request"
+  | "queue-publish"
+  | "cache-write"
+  | "cache-read"
+  | "event-emit"
+  | "file-io"
+  | "process-exit";
+
+export interface FileLocation {
+  /** File path relative to repo root (same format as ReviewComment.filePath). */
+  filePath: string;
+  /** 1-based line number on NEW side (same as ReviewComment.line). */
+  line: number;
+  endLine?: number;
+  /** True if this location is inside a changed diff hunk. */
+  isChanged: boolean;
+}
+
+export interface ChangedSymbol {
+  name: string;
+  kind: "function" | "method" | "class" | "variable" | "type" | "export";
+  location: FileLocation;
+  /** Fully qualified name: "UserService.handleCreateUser". */
+  qualifiedName?: string;
+  confidence: ConfidenceLevel;
+}
+
+export interface SideEffect {
+  kind: SideEffectKind;
+  /** Human-readable description, e.g. "prisma.user.create()". */
+  description: string;
+  location: FileLocation;
+  confidence: ConfidenceLevel;
+}
+
+export interface CodeSnippet {
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  /** Source lines — populated on-demand, not persisted in analysis JSON. */
+  content?: string;
+  language: string;
+}
+
+export interface ExecutionStep {
+  id: string;
+  order: number;
+  symbol: ChangedSymbol;
+  snippet: CodeSnippet;
+  sideEffects: SideEffect[];
+  /** Qualified names of downstream symbols this step calls. */
+  callsTo: string[];
+  /** Why this step is included in the flow. */
+  rationale: string;
+  /** Whether this step's code was modified by the diff. */
+  isChanged: boolean;
+  confidence: ConfidenceLevel;
+}
+
+export interface ChangedBehavior {
+  id: string;
+  /** Human-readable name: "POST /api/users → createUser". */
+  name: string;
+  entrypointKind: EntrypointKind;
+  entrypoint: ChangedSymbol;
+  steps: ExecutionStep[];
+  /** Aggregate side effects across all steps (deduplicated). */
+  sideEffects: SideEffect[];
+  /** Files touched by this behavior. */
+  touchedFiles: string[];
+  changedStepCount: number;
+  totalStepCount: number;
+  confidence: ConfidenceLevel;
+  summary?: string;
+}
+
+export interface BehaviorAnalysis {
+  sessionId: string;
+  /** Diff fingerprint at time of analysis, for cache invalidation. */
+  diffFingerprint: string;
+  behaviors: ChangedBehavior[];
+  /** Symbols that changed but could not be traced to any entrypoint. */
+  orphanedSymbols: ChangedSymbol[];
+  analysisTimeMs: number;
+  createdAt: string;
+  warnings: string[];
+}
