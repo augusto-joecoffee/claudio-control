@@ -1,177 +1,318 @@
 /**
- * Build an approximate call graph by scanning function bodies for calls
- * to other known symbols. Regex-based — explicitly heuristic.
+ * Layer 3: Reference and Call Graph
+ *
+ * Builds call/reference edges between symbol nodes using the TypeScript type
+ * checker. Enriches the SemanticCodeGraph with edges.
+ *
+ * Also provides extractImpactGraph() which produces the PR Impact Graph
+ * (Graph 2) by BFS from changed nodes through the full graph.
  */
 
-import { readFile } from "fs/promises";
-import { join, dirname, resolve } from "path";
-import type { ChangedSymbol } from "../types";
+import { SyntaxKind, Node } from "ts-morph";
+import type { Project } from "ts-morph";
+import type { ConfidenceLevel } from "../types";
+import type {
+	SemanticCodeGraph, SymbolNode, SymbolId, GraphEdge, EdgeKind,
+	ImpactGraph, DiffAnchor,
+} from "./graph-types";
+import { makeSymbolId, addEdge } from "./graph-types";
 
-interface ImportEntry {
-	localName: string;
-	sourcePath: string; // Resolved relative to cwd
-}
+/**
+ * Populate call edges in the semantic graph using the type checker.
+ * Should be called after symbol-index has populated all nodes.
+ */
+export function buildEdges(
+	project: Project,
+	graph: SemanticCodeGraph,
+	cwd: string,
+): { warnings: string[] } {
+	const warnings: string[] = [];
 
-/** Parse import statements from a source file and resolve paths. */
-function parseImports(fileContent: string, filePath: string, cwd: string): ImportEntry[] {
-	const imports: ImportEntry[] = [];
-	const dir = dirname(filePath);
+	// Clear existing edges (in case of re-index)
+	graph.edges = [];
+	graph.inbound = new Map();
+	graph.outbound = new Map();
 
-	// Match: import { a, b } from './path'
-	const namedImportRe = /import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]/g;
-	let m: RegExpExecArray | null;
-	while ((m = namedImportRe.exec(fileContent)) !== null) {
-		const names = m[1].split(",").map((n) => n.trim().split(/\s+as\s+/).pop()!.trim()).filter(Boolean);
-		const source = m[2];
-		if (source.startsWith(".")) {
-			const resolved = resolveImportPath(dir, source);
-			for (const name of names) {
-				imports.push({ localName: name, sourcePath: resolved });
+	for (const [fromId, fromNode] of graph.nodes) {
+		// Skip types and exports — they don't make calls
+		if (fromNode.kind === "type" || fromNode.kind === "export") continue;
+
+		try {
+			const callEdges = resolveNodeCalls(fromNode, graph, cwd);
+			for (const edge of callEdges) {
+				addEdge(graph, edge);
 			}
+		} catch (e) {
+			warnings.push(`Edge resolution failed for ${fromNode.qualifiedName}: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
-	// Match: import foo from './path'
-	const defaultImportRe = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]/g;
-	while ((m = defaultImportRe.exec(fileContent)) !== null) {
-		const name = m[1];
-		const source = m[2];
-		if (source.startsWith(".")) {
-			imports.push({ localName: name, sourcePath: resolveImportPath(dir, source) });
-		}
-	}
-
-	return imports;
-}
-
-/** Resolve a relative import path, stripping extension. */
-function resolveImportPath(fromDir: string, importPath: string): string {
-	const resolved = resolve(fromDir, importPath);
-	// Strip extension for matching — we'll match against filePath sans-extension
-	return resolved.replace(/\.(ts|tsx|js|jsx|mjs|cjs)$/, "");
-}
-
-/** Strip extension from a file path for matching. */
-function stripExt(filePath: string): string {
-	return filePath.replace(/\.(ts|tsx|js|jsx|mjs|cjs)$/, "");
+	return { warnings };
 }
 
 /**
- * Build an approximate call graph from changed symbols.
- *
- * Returns an adjacency list: Map<qualifiedName, qualifiedName[]>
- * and a list of warnings about what couldn't be resolved.
+ * Resolve outgoing calls from a single symbol node.
+ * Uses multiple resolution strategies for accuracy.
  */
-export async function buildCallGraph(
-	allSymbols: ChangedSymbol[],
-	fileContents: Map<string, string>,
-	fileLines: Map<string, string[]>,
+function resolveNodeCalls(
+	fromNode: SymbolNode,
+	graph: SemanticCodeGraph,
 	cwd: string,
-): Promise<{
-	graph: Map<string, string[]>;
-	warnings: string[];
-}> {
-	const graph = new Map<string, string[]>();
-	const warnings: string[] = [];
+): GraphEdge[] {
+	const edges: GraphEdge[] = [];
+	const seen = new Set<SymbolId>();
 
-	// Build a lookup: symbolName → ChangedSymbol[] (there can be duplicates across files)
-	const symbolsByName = new Map<string, ChangedSymbol[]>();
-	const symbolsByQualified = new Map<string, ChangedSymbol>();
+	try {
+		const callExpressions = fromNode.node.getDescendantsOfKind(SyntaxKind.CallExpression);
 
-	for (const sym of allSymbols) {
-		const key = sym.qualifiedName ?? sym.name;
-		symbolsByQualified.set(key, sym);
+		for (const call of callExpressions) {
+			try {
+				const result = resolveCallTarget(call, graph, cwd);
+				if (!result) continue;
 
-		const existing = symbolsByName.get(sym.name) ?? [];
-		existing.push(sym);
-		symbolsByName.set(sym.name, existing);
-	}
+				const { targetId, confidence, isAsync } = result;
+				if (seen.has(targetId)) continue;
+				seen.add(targetId);
 
-	// For each file, build import maps
-	const importsByFile = new Map<string, ImportEntry[]>();
-	for (const [filePath, content] of fileContents) {
-		importsByFile.set(filePath, parseImports(content, filePath, cwd));
-	}
-
-	// For each symbol, scan its body for calls to other symbols
-	for (const symbol of allSymbols) {
-		const lines = fileLines.get(symbol.location.filePath);
-		if (!lines) continue;
-
-		const startIdx = symbol.location.line - 1; // 0-based
-		const endIdx = Math.min((symbol.location.endLine ?? symbol.location.line + 10) - 1, lines.length);
-		const body = lines.slice(startIdx, endIdx).join("\n");
-
-		const callerKey = symbol.qualifiedName ?? symbol.name;
-		const callees: string[] = [];
-
-		// Check for calls to other symbols
-		for (const [name, candidates] of symbolsByName) {
-			if (name === symbol.name && candidates.length === 1 && candidates[0] === symbol) continue; // Skip self
-
-			// Check if the body contains this symbol name as a function call or reference
-			// Use word boundary to avoid partial matches
-			const callRegex = new RegExp(`\\b${escapeRegex(name)}\\s*\\(`, "g");
-			if (!callRegex.test(body)) continue;
-
-			// Determine which candidate this call targets
-			const target = resolveCallTarget(
-				name,
-				candidates,
-				symbol.location.filePath,
-				importsByFile.get(symbol.location.filePath) ?? [],
-				cwd,
-			);
-
-			if (target) {
-				const targetKey = target.qualifiedName ?? target.name;
-				if (targetKey !== callerKey) {
-					callees.push(targetKey);
-				}
-			}
+				edges.push({
+					from: fromNode.id,
+					to: targetId,
+					kind: "calls",
+					confidence,
+					isAsync,
+				});
+			} catch { /* individual call can fail */ }
 		}
+	} catch { /* descendant traversal can fail */ }
 
-		if (callees.length > 0) {
-			graph.set(callerKey, callees);
-		}
-	}
-
-	return { graph, warnings };
+	return edges;
 }
 
-/** Resolve which symbol a call targets based on imports and file proximity. */
+/**
+ * Resolve a single call expression to a target SymbolId in the graph.
+ * Tries multiple strategies in order of reliability.
+ */
 function resolveCallTarget(
-	name: string,
-	candidates: ChangedSymbol[],
-	callerFile: string,
-	imports: ImportEntry[],
+	call: Node,
+	graph: SemanticCodeGraph,
 	cwd: string,
-): ChangedSymbol | null {
-	// 1. Same-file candidate
-	const sameFile = candidates.find((c) => c.location.filePath === callerFile);
-	if (sameFile) return sameFile;
+): { targetId: SymbolId; confidence: ConfidenceLevel; isAsync: boolean } | null {
+	const expr = (call as any).getExpression?.() as Node | undefined;
+	if (!expr) return null;
 
-	// 2. Imported candidate
-	const importEntry = imports.find((imp) => imp.localName === name);
-	if (importEntry) {
-		const target = candidates.find((c) => {
-			const candidatePath = stripExt(c.location.filePath);
-			// Check if import resolves to this file (handle index files too)
-			return (
-				importEntry.sourcePath === candidatePath ||
-				importEntry.sourcePath === candidatePath + "/index" ||
-				importEntry.sourcePath.endsWith("/" + candidatePath)
-			);
-		});
-		if (target) return target;
+	// Detect async: is this call awaited?
+	const isAsync = call.getParent()?.getKind() === SyntaxKind.AwaitExpression
+		|| (call as any).getExpression?.()?.getText?.()?.includes(".then") === true;
+
+	// Strategy 1: getSymbol() on the expression
+	let tsSym = expr.getSymbol?.() ?? null;
+
+	// Strategy 2: Follow aliased symbols (re-exports, import aliases)
+	if (tsSym) {
+		try {
+			const aliased = tsSym.getAliasedSymbol?.();
+			if (aliased) tsSym = aliased;
+		} catch { /* not an alias */ }
 	}
 
-	// 3. If only one candidate, use it (low confidence)
-	if (candidates.length === 1) return candidates[0];
+	// Strategy 3: For property access (this.foo(), obj.foo())
+	if (!tsSym && Node.isPropertyAccessExpression(expr)) {
+		try {
+			const nameNode = expr.getNameNode();
+			tsSym = nameNode.getSymbol?.() ?? null;
+			if (tsSym) {
+				try {
+					const aliased = tsSym.getAliasedSymbol?.();
+					if (aliased) tsSym = aliased;
+				} catch { /* not an alias */ }
+			}
+		} catch { /* ignore */ }
+	}
+
+	// Strategy 4: Call signature from expression type
+	if (!tsSym) {
+		try {
+			const exprType = expr.getType();
+			const callSignatures = exprType.getCallSignatures();
+			if (callSignatures.length > 0) {
+				const sigDecl = callSignatures[0].getDeclaration();
+				if (sigDecl) tsSym = sigDecl.getSymbol?.() ?? null;
+			}
+		} catch { /* ignore */ }
+	}
+
+	if (!tsSym) return null;
+
+	const declarations = tsSym.getDeclarations();
+	if (declarations.length === 0) return null;
+
+	const decl = declarations[0];
+	const declFile = decl.getSourceFile().getFilePath();
+
+	// Skip node_modules
+	if (declFile.includes("/node_modules/")) return null;
+
+	const relPath = makeRelative(declFile, cwd);
+	if (relPath.startsWith("/")) return null;
+
+	const declName = tsSym.getName();
+	if (!declName || declName === "__function" || declName === "__object") return null;
+
+	const parentClass = getParentClassName(decl);
+	const qualifiedName = parentClass ? `${parentClass}.${declName}` : declName;
+	const targetId = makeSymbolId(relPath, qualifiedName);
+
+	// Check if target exists in graph
+	if (graph.nodes.has(targetId)) {
+		return { targetId, confidence: "high", isAsync };
+	}
+
+	// Try without file path (for symbols that might be indexed with a different path)
+	for (const [id, node] of graph.nodes) {
+		if (node.qualifiedName === qualifiedName && node.filePath === relPath) {
+			return { targetId: id, confidence: "high", isAsync };
+		}
+	}
+
+	// Try just by name (less confident)
+	for (const [id, node] of graph.nodes) {
+		if (node.name === declName && node.filePath === relPath) {
+			return { targetId: id, confidence: "medium", isAsync };
+		}
+	}
 
 	return null;
 }
 
-function escapeRegex(str: string): string {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// ── Impact Graph Extraction ──
+
+/**
+ * Extract the PR Impact Graph (Graph 2) by walking outward from changed nodes.
+ *
+ * Walks UPSTREAM (callers, via inbound edges) to find affected entrypoints.
+ * Walks DOWNSTREAM (callees, via outbound edges) to find affected side effects.
+ * Collects the neighborhood subgraph within maxHops.
+ */
+export function extractImpactGraph(
+	fullGraph: SemanticCodeGraph,
+	anchors: DiffAnchor[],
+	maxHops: number = 4,
+): ImpactGraph {
+	const changed = new Map<SymbolId, DiffAnchor>();
+	const neighborhood = new Map<SymbolId, SymbolNode>();
+	const impactEdges: GraphEdge[] = [];
+	const affectedEntrypoints: SymbolId[] = [];
+	const affectedSideEffects: Array<{ symbolId: SymbolId; effects: typeof fullGraph extends never ? never : any[] }> = [];
+
+	// Seed with changed symbols
+	for (const anchor of anchors) {
+		if (anchor.resolvedNode) {
+			changed.set(anchor.symbolId, anchor);
+			neighborhood.set(anchor.symbolId, anchor.resolvedNode);
+		}
+	}
+
+	if (changed.size === 0) {
+		return { changed, neighborhood, edges: [], affectedEntrypoints: [], affectedSideEffects: [] };
+	}
+
+	// BFS upstream: find entrypoints that can reach changed code
+	const upstreamVisited = new Set<SymbolId>();
+	let frontier = new Set(changed.keys());
+
+	for (let hop = 0; hop < maxHops && frontier.size > 0; hop++) {
+		const nextFrontier = new Set<SymbolId>();
+		for (const nodeId of frontier) {
+			if (upstreamVisited.has(nodeId)) continue;
+			upstreamVisited.add(nodeId);
+
+			const node = fullGraph.nodes.get(nodeId);
+			if (node) {
+				neighborhood.set(nodeId, node);
+				if (node.entrypointKind && !affectedEntrypoints.includes(nodeId)) {
+					affectedEntrypoints.push(nodeId);
+				}
+			}
+
+			// Follow inbound edges (callers)
+			const inEdges = fullGraph.inbound.get(nodeId) ?? [];
+			for (const edge of inEdges) {
+				if (!upstreamVisited.has(edge.from)) {
+					nextFrontier.add(edge.from);
+					impactEdges.push(edge);
+				}
+			}
+		}
+		frontier = nextFrontier;
+	}
+
+	// BFS downstream: find side effects reachable from changed code
+	const downstreamVisited = new Set<SymbolId>();
+	frontier = new Set(changed.keys());
+	const sideEffectSet = new Set<SymbolId>();
+
+	for (let hop = 0; hop < maxHops && frontier.size > 0; hop++) {
+		const nextFrontier = new Set<SymbolId>();
+		for (const nodeId of frontier) {
+			if (downstreamVisited.has(nodeId)) continue;
+			downstreamVisited.add(nodeId);
+
+			const node = fullGraph.nodes.get(nodeId);
+			if (node) {
+				neighborhood.set(nodeId, node);
+				if (node.sideEffects.length > 0 && !sideEffectSet.has(nodeId)) {
+					sideEffectSet.add(nodeId);
+					affectedSideEffects.push({ symbolId: nodeId, effects: node.sideEffects });
+				}
+			}
+
+			// Follow outbound edges (callees)
+			const outEdges = fullGraph.outbound.get(nodeId) ?? [];
+			for (const edge of outEdges) {
+				if (!downstreamVisited.has(edge.to)) {
+					nextFrontier.add(edge.to);
+					impactEdges.push(edge);
+				}
+			}
+		}
+		frontier = nextFrontier;
+	}
+
+	// Also include entrypoints of changed nodes themselves
+	for (const [id, anchor] of changed) {
+		const node = anchor.resolvedNode;
+		if (node?.entrypointKind && !affectedEntrypoints.includes(id)) {
+			affectedEntrypoints.push(id);
+		}
+	}
+
+	// Deduplicate edges
+	const edgeSet = new Set<string>();
+	const uniqueEdges = impactEdges.filter((e) => {
+		const key = `${e.from}->${e.to}:${e.kind}`;
+		if (edgeSet.has(key)) return false;
+		edgeSet.add(key);
+		return true;
+	});
+
+	return {
+		changed,
+		neighborhood,
+		edges: uniqueEdges,
+		affectedEntrypoints,
+		affectedSideEffects,
+	};
+}
+
+// ── Helpers ──
+
+function getParentClassName(node: Node): string | null {
+	const cls = node.getFirstAncestorByKind(SyntaxKind.ClassDeclaration);
+	return cls?.getName() ?? null;
+}
+
+function makeRelative(absPath: string, cwd: string): string {
+	const cwdNormalized = cwd.endsWith("/") ? cwd : cwd + "/";
+	if (absPath.startsWith(cwdNormalized)) return absPath.slice(cwdNormalized.length);
+	return absPath;
 }

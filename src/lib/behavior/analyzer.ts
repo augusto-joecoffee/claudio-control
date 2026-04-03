@@ -1,0 +1,209 @@
+/**
+ * Behavior Analysis Orchestrator
+ *
+ * Wires the 5 analysis layers together and maps internal graph types
+ * to the API-compatible BehaviorAnalysis output.
+ *
+ * Pipeline:
+ *   Layer 2+3: getProjectAndGraph() → SemanticCodeGraph (cached)
+ *   Layer 3:   buildEdges() → populates graph edges
+ *   Layer 1:   anchorDiffToSymbols() → DiffAnchor[]
+ *   Layer 3:   extractImpactGraph() → ImpactGraph
+ *   Layer 4:   deriveFlows() → ReviewerFlow[]
+ *   Mapping:   flowToBehavior() → BehaviorAnalysis
+ */
+
+import { randomUUID } from "crypto";
+import type {
+	BehaviorAnalysis, ChangedBehavior, ChangedSymbol, ExecutionStep,
+	CodeSnippet, ConfidenceLevel,
+} from "../types";
+import type { ReviewerFlow, FlowStep, SymbolNode } from "./graph-types";
+import { parseSymbolId } from "./graph-types";
+import { getProjectAndGraph, invalidateGraphCache } from "./symbol-index";
+import { buildEdges, extractImpactGraph } from "./call-graph";
+import { anchorDiffToSymbols } from "./diff-anchors";
+import { deriveFlows } from "./flow-derivation";
+import { ANALYZABLE_EXTENSIONS } from "./patterns";
+
+/**
+ * Main analysis entry point. Called by index.ts.
+ * Preserves the existing function signature for API compatibility.
+ */
+export async function analyzeWithTypeScript(
+	sessionId: string,
+	rawDiff: string,
+	cwd: string,
+	diffFingerprint: string,
+): Promise<BehaviorAnalysis> {
+	const start = performance.now();
+	const warnings: string[] = [];
+
+	try {
+		// Determine changed file paths for cache refresh
+		const { parseDiffRanges } = await import("./diff-symbols");
+		const diffFiles = parseDiffRanges(rawDiff);
+		const changedPaths = diffFiles
+			.filter((f) => !f.isDeleted)
+			.map((f) => f.filePath)
+			.filter((p) => {
+				const ext = p.split(".").pop()?.toLowerCase() ?? "";
+				return ANALYZABLE_EXTENSIONS.has(ext);
+			});
+
+		if (changedPaths.length === 0) {
+			return emptyResult(sessionId, diffFingerprint, start, [
+				"No analyzable TS/JS files in the diff.",
+			]);
+		}
+
+		// Layer 2: Get semantic graph (cached, refreshes changed files)
+		const { project, graph } = getProjectAndGraph(cwd, changedPaths);
+
+		const nodeCount = graph.nodes.size;
+		warnings.push(`Graph: ${nodeCount} symbols indexed from project.`);
+
+		// Layer 3: Build call edges (populates graph.edges, graph.inbound, graph.outbound)
+		const { warnings: edgeWarnings } = buildEdges(project, graph, cwd);
+		warnings.push(...edgeWarnings);
+		warnings.push(`Edges: ${graph.edges.length} call edges resolved.`);
+
+		// Layer 1: Anchor diff to AST symbols
+		const { anchors, warnings: anchorWarnings } = anchorDiffToSymbols(rawDiff, project, graph, cwd);
+		warnings.push(...anchorWarnings);
+		warnings.push(`Anchors: ${anchors.length} changed symbols found in diff.`);
+
+		if (anchors.length === 0) {
+			return emptyResult(sessionId, diffFingerprint, start, [
+				...warnings,
+				"No changed symbols could be anchored to the AST.",
+			]);
+		}
+
+		// Layer 3 (cont): Extract impact graph
+		const impact = extractImpactGraph(graph, anchors, 4);
+		warnings.push(`Impact: ${impact.neighborhood.size} nodes in neighborhood, ${impact.affectedEntrypoints.length} entrypoints, ${impact.affectedSideEffects.length} side-effect nodes.`);
+
+		// Layer 4: Derive reviewer flows
+		const { flows, orphanedSymbolIds } = deriveFlows(impact, graph);
+		warnings.push(`Flows: ${flows.length} flows derived, ${orphanedSymbolIds.length} orphaned symbols.`);
+
+		// Map to API types
+		const behaviors = flows.map(flowToBehavior);
+		const orphanedSymbols = orphanedSymbolIds.map((id) => {
+			const node = graph.nodes.get(id);
+			const anchor = impact.changed.get(id);
+			return nodeToChangedSymbol(node ?? null, id, true);
+		}).filter((s): s is ChangedSymbol => s !== null);
+
+		return {
+			sessionId,
+			diffFingerprint,
+			behaviors,
+			orphanedSymbols,
+			analysisTimeMs: Math.round(performance.now() - start),
+			createdAt: new Date().toISOString(),
+			warnings,
+		};
+	} catch (e) {
+		warnings.push(`Analysis error: ${e instanceof Error ? e.message : String(e)}`);
+		return emptyResult(sessionId, diffFingerprint, start, warnings);
+	}
+}
+
+/** Invalidate all caches. */
+export function invalidateProjectCache(): void {
+	invalidateGraphCache();
+}
+
+// ── Output Mapping ──
+
+function flowToBehavior(flow: ReviewerFlow): ChangedBehavior {
+	const behaviorId = randomUUID();
+
+	const steps: ExecutionStep[] = flow.steps.map((step, i) => ({
+		id: `${behaviorId}-step-${i}`,
+		order: i,
+		symbol: nodeToChangedSymbol(step.node, step.node.id, step.isChanged)!,
+		snippet: {
+			filePath: step.node.filePath,
+			startLine: Math.max(1, step.node.line - 2),
+			endLine: step.node.endLine + 2,
+			language: detectLang(step.node.filePath),
+		} as CodeSnippet,
+		sideEffects: step.sideEffects,
+		callsTo: step.callsTo.map((id) => parseSymbolId(id).qualifiedName),
+		rationale: step.rationale,
+		isChanged: step.isChanged,
+		confidence: step.confidence,
+	}));
+
+	return {
+		id: behaviorId,
+		name: flow.name,
+		entrypointKind: flow.entrypointKind,
+		entrypoint: nodeToChangedSymbol(flow.entrypoint, flow.entrypoint.id, false)!,
+		steps,
+		sideEffects: flow.sideEffects,
+		touchedFiles: flow.touchedFiles,
+		changedStepCount: steps.filter((s) => s.isChanged).length,
+		totalStepCount: steps.length,
+		confidence: flow.confidence,
+	};
+}
+
+function nodeToChangedSymbol(
+	node: SymbolNode | null,
+	symbolId: string,
+	isChanged: boolean,
+): ChangedSymbol | null {
+	if (!node) {
+		const { filePath, qualifiedName } = parseSymbolId(symbolId);
+		return {
+			name: qualifiedName,
+			kind: "function",
+			location: { filePath, line: 0, isChanged },
+			qualifiedName,
+			confidence: "low",
+		};
+	}
+
+	return {
+		name: node.name,
+		kind: node.kind,
+		location: {
+			filePath: node.filePath,
+			line: node.line,
+			endLine: node.endLine,
+			isChanged,
+		},
+		qualifiedName: node.qualifiedName,
+		confidence: node.confidence,
+	};
+}
+
+function detectLang(filePath: string): string {
+	const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+	const map: Record<string, string> = {
+		ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+		mjs: "javascript", cjs: "javascript",
+	};
+	return map[ext] ?? "text";
+}
+
+function emptyResult(
+	sessionId: string,
+	diffFingerprint: string,
+	startTime: number,
+	warnings: string[],
+): BehaviorAnalysis {
+	return {
+		sessionId,
+		diffFingerprint,
+		behaviors: [],
+		orphanedSymbols: [],
+		analysisTimeMs: Math.round(performance.now() - startTime),
+		createdAt: new Date().toISOString(),
+		warnings,
+	};
+}

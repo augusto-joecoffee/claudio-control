@@ -1,8 +1,7 @@
 /**
- * Behavior analysis orchestrator.
- * Delegates to the ts-morph-based analyzer for accurate, compiler-backed
- * call graph resolution and symbol extraction.
+ * Behavior analysis public API.
+ * Delegates to the layered analysis pipeline.
  */
 
-export { analyzeWithTypeScript as analyzeBehaviors } from "./ts-analyzer";
-export { invalidateProjectCache } from "./ts-analyzer";
+export { analyzeWithTypeScript as analyzeBehaviors } from "./analyzer";
+export { invalidateProjectCache } from "./analyzer";
