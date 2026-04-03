@@ -82,7 +82,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 
 /**
  * Poll the Claude session's JSONL for a response to our behavior analysis prompt.
- * Uses the same [id:xxx] tag matching as the comment queue.
+ *
+ * Unlike review comments (which get a single text response), behavior analysis
+ * prompts trigger Claude to make tool calls (git diff, read files) before
+ * responding with JSON. The JSONL contains many interleaved user (tool_result)
+ * and assistant (tool_use/text) messages. We need to find the LAST assistant
+ * text block that contains the JSON response, scanning past all the tool calls.
  */
 async function pollForResponse(sessionId: string, analysisId: string): Promise<string | null> {
 	if (!analysisId) return null;
@@ -103,15 +108,32 @@ async function pollForResponse(sessionId: string, analysisId: string): Promise<s
 
 		if (promptIdx < 0) return null;
 
-		// Extract the LAST assistant text after the prompt
+		// Scan ALL messages after the prompt (don't stop at user messages —
+		// tool_result messages are type "user" and we need to scan past them).
+		// Look for the last assistant text that contains JSON (starts with { or has "flows").
+		let lastJsonText: string | null = null;
 		let lastText: string | null = null;
+
 		for (let i = promptIdx + 1; i < conversation.length; i++) {
 			const m = conversation[i];
-			if (m.type === "user") break; // Stop at next user message
-			if (m.type === "assistant" && m.text) lastText = m.text;
+			// Stop if we hit a REAL user message (not a tool_result)
+			// Real user messages have string content, tool_results have array content
+			// In linesToConversation, tool_results are filtered out, so any user
+			// message here is a real human message → stop
+			if (m.type === "user" && m.text && !m.text.startsWith("[{") && m.toolUses.length === 0) {
+				break;
+			}
+			if (m.type === "assistant" && m.text) {
+				lastText = m.text;
+				// Check if this text contains JSON (the actual response)
+				if (m.text.includes('"flows"') || m.text.trim().startsWith("{")) {
+					lastJsonText = m.text;
+				}
+			}
 		}
 
-		return lastText;
+		// Prefer the JSON-containing text, fall back to last assistant text
+		return lastJsonText ?? lastText;
 	} catch {
 		return null;
 	}
