@@ -22,7 +22,8 @@ import { ClaudeSession, SessionStatus, TerminalEntry, ViewMode } from "@/lib/typ
 const EMPTY_SET: Set<string> = new Set();
 
 export default function Dashboard() {
-  const { sessions, isLoading, error, hooksActive, repoIds, refresh } = useSessions();
+  const [modal, setModal] = useState<{ repoPath?: string; repoName?: string } | null>(null);
+  const { sessions, isLoading, error, hooksActive, repoIds, refresh } = useSessions(!!modal);
   const { layout, reorderSections, reorderCards } = useDashboardLayout();
   const settings = useSettings();
   const [targetScreen, setTargetScreen] = useState<number | null>(() => {
@@ -31,7 +32,6 @@ export default function Dashboard() {
     return saved !== null ? (saved === "" ? null : parseInt(saved, 10)) : null;
   });
   const [freshlyChanged, setFreshlyChanged] = useState<Set<string>>(new Set());
-  const [modal, setModal] = useState<{ repoPath?: string; repoName?: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window === "undefined") return "grid";
     const saved = localStorage.getItem("viewMode");

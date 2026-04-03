@@ -1,11 +1,6 @@
 import useSWR from "swr";
 
-interface AppOption {
-  id: string;
-  installed: boolean;
-}
-
-interface SettingsResponse {
+interface ConfigResponse {
   config: {
     notifications: boolean;
     notificationSound: boolean;
@@ -13,34 +8,28 @@ interface SettingsResponse {
     editor: string;
     gitGui: string;
     terminalApp: string;
-  };
-  options: {
-    editors: AppOption[];
-    gitGuis: AppOption[];
-  };
+    terminalUseTmux?: boolean;
+    terminalTmuxMode?: string;
+  } | null;
 }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-function isAppAvailable(options: AppOption[] | undefined, selectedId: string | undefined): boolean {
-  if (!options || !selectedId || selectedId === "none") return false;
-  return options.find((o) => o.id === selectedId)?.installed ?? false;
-}
-
 export function useSettings() {
-  const { data } = useSWR<SettingsResponse>("/api/settings", fetcher, {
+  const { data } = useSWR<ConfigResponse>("/api/config", fetcher, {
     revalidateOnFocus: false,
     refreshInterval: 0,
   });
 
-  const config = data?.config as (SettingsResponse["config"] & { terminalUseTmux?: boolean; terminalTmuxMode?: string }) | undefined;
+  const config = data?.config;
 
   return {
     notifications: config?.notifications ?? true,
     notificationSound: config?.notificationSound ?? true,
     alwaysNotify: config?.alwaysNotify ?? false,
-    editorAvailable: isAppAvailable(data?.options?.editors, config?.editor),
-    gitGuiAvailable: isAppAvailable(data?.options?.gitGuis, config?.gitGui),
+    // Assume editor/gitGui are available if configured (skip the expensive installed-app check)
+    editorAvailable: !!config?.editor && config.editor !== "none",
+    gitGuiAvailable: !!config?.gitGui && config.gitGui !== "none",
     inlineTerminal: config?.terminalApp === "inline",
     terminalUseTmux: config?.terminalUseTmux ?? false,
     terminalTmuxMode: (config?.terminalTmuxMode as "per-project" | "choose") ?? "per-project",

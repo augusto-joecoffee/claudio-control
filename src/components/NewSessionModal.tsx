@@ -64,8 +64,12 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
   const [worktrees, setWorktrees] = useState<{ path: string; branch: string | null; isMain: boolean }[]>([]);
   const [worktreesLoading, setWorktreesLoading] = useState(false);
   const [selectedWorktree, setSelectedWorktree] = useState("");
+  const [worktreePickerOpen, setWorktreePickerOpen] = useState(false);
+  const [worktreeFilter, setWorktreeFilter] = useState("");
+  const [highlightedWorktree, setHighlightedWorktree] = useState(-1);
   const branchRef = useRef<HTMLInputElement>(null);
   const repoListRef = useRef<HTMLDivElement>(null);
+  const worktreeListRef = useRef<HTMLDivElement>(null);
   const isRepoMode = !repoPath;
 
   const modalRef = useRef<HTMLDivElement>(null);
@@ -118,36 +122,24 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
     if (isRepoMode) fetchRepos();
   }, [isRepoMode]);
 
-  // Load configured initial prompt from settings — only if user hasn't typed yet
+  // Load config once — covers initial prompt, base branch, and terminal config.
+  // Uses /api/config (lightweight) instead of /api/settings (spawns dozens of processes).
   useEffect(() => {
-    fetch("/api/settings")
+    fetch("/api/config")
       .then((r) => r.json())
       .then((data) => {
-        setPrompt((prev) => (prev === null ? (data.config?.initialPrompt ?? "") : prev));
-        setBaseBranch((prev) => (prev === "" ? (data.config?.defaultBaseBranch ?? "main") : prev));
-      })
-      .catch(() => setPrompt((prev) => (prev === null ? "" : prev)));
-  }, []);
+        const c = data.config;
+        if (!c) return;
 
-  // Focus branch input when in repo-scoped mode
-  useEffect(() => {
-    if (!isRepoMode) {
-      setTimeout(() => branchRef.current?.focus(), 100);
-    }
-  }, [isRepoMode]);
+        setPrompt((prev) => (prev === null ? (c.initialPrompt ?? "") : prev));
+        setBaseBranch((prev) => (prev === "" ? (c.defaultBaseBranch ?? "main") : prev));
 
-  // Fetch terminal config to determine if tmux picker should show
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((data) => {
         const cfg: TerminalConfig = {
-          terminalUseTmux: data.config?.terminalUseTmux ?? false,
-          terminalTmuxMode: data.config?.terminalTmuxMode ?? "per-project",
+          terminalUseTmux: c.terminalUseTmux ?? false,
+          terminalTmuxMode: c.terminalTmuxMode ?? "per-project",
         };
         setTerminalConfig(cfg);
 
-        // If tmux enabled and mode is "choose", fetch live sessions and pre-fill project name
         if (cfg.terminalUseTmux && cfg.terminalTmuxMode === "choose") {
           if (repoName) setSelectedTmuxSession(repoName);
           setTmuxSessionsLoading(true);
@@ -158,8 +150,18 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
             .finally(() => setTmuxSessionsLoading(false));
         }
       })
-      .catch(() => setTerminalConfig(null));
+      .catch(() => {
+        setPrompt((prev) => (prev === null ? "" : prev));
+        setTerminalConfig(null);
+      });
   }, [repoName]);
+
+  // Focus branch input when in repo-scoped mode
+  useEffect(() => {
+    if (!isRepoMode) {
+      setTimeout(() => branchRef.current?.focus(), 100);
+    }
+  }, [isRepoMode]);
 
   // Fetch existing worktrees when repo is known
   useEffect(() => {
@@ -199,6 +201,48 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
       }
     }
   }, [highlightedRepo]);
+
+  const nonMainWorktrees = worktrees.filter((w) => !w.isMain);
+  const filteredWorktrees = nonMainWorktrees.filter((w) => {
+    const label = w.branch || w.path.split("/").pop() || "";
+    return label.toLowerCase().includes(worktreeFilter.toLowerCase());
+  });
+
+  // Scroll highlighted worktree into view
+  useEffect(() => {
+    if (highlightedWorktree >= 0 && worktreeListRef.current) {
+      const items = worktreeListRef.current.children;
+      if (items[highlightedWorktree]) {
+        (items[highlightedWorktree] as HTMLElement).scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [highlightedWorktree]);
+
+  const selectWorktree = (path: string) => {
+    setSelectedWorktree(path);
+    if (path) setBranchName("");
+    setWorktreePickerOpen(false);
+    setWorktreeFilter("");
+    setHighlightedWorktree(-1);
+    if (!path) setTimeout(() => branchRef.current?.focus(), 50);
+  };
+
+  const handleWorktreeFilterKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedWorktree((prev) => Math.min(prev + 1, filteredWorktrees.length));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedWorktree((prev) => Math.max(prev - 1, -1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightedWorktree === -1) {
+        selectWorktree("");
+      } else if (filteredWorktrees[highlightedWorktree]) {
+        selectWorktree(filteredWorktrees[highlightedWorktree].path);
+      }
+    }
+  };
 
   const selectRepo = (repo: RepoInfo) => {
     setSelectedRepo(repo.path);
@@ -368,7 +412,7 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
 
       <div
         ref={modalRef}
@@ -544,26 +588,87 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
           )}
 
           {/* Existing worktree picker */}
-          {!needsSetup && !worktreesLoading && worktrees.filter((w) => !w.isMain).length > 0 && (
+          {!needsSetup && !worktreesLoading && nonMainWorktrees.length > 0 && (
             <div>
               <label className="block text-xs font-medium text-zinc-400 mb-1.5">Existing worktree</label>
-              <select
-                value={selectedWorktree}
-                onChange={(e) => {
-                  setSelectedWorktree(e.target.value);
-                  if (e.target.value) setBranchName("");
-                }}
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 focus:outline-hidden focus:border-zinc-600 transition-colors appearance-none cursor-pointer"
+
+              {/* Selected worktree display / trigger */}
+              <button
+                onClick={() => setWorktreePickerOpen(!worktreePickerOpen)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-sm transition-colors"
               >
-                <option value="">None — create new or use main</option>
-                {worktrees
-                  .filter((w) => !w.isMain)
-                  .map((w) => (
-                    <option key={w.path} value={w.path}>
-                      {w.branch || w.path.split("/").pop()}
-                    </option>
-                  ))}
-              </select>
+                {selectedWorktree ? (
+                  <span className="text-zinc-200 font-medium font-(family-name:--font-geist-mono) truncate">
+                    {worktrees.find((w) => w.path === selectedWorktree)?.branch || selectedWorktree.split("/").pop()}
+                  </span>
+                ) : (
+                  <span className="text-zinc-500">None — create new or use main</span>
+                )}
+                <svg
+                  className={`w-4 h-4 text-zinc-500 shrink-0 ml-2 transition-transform ${worktreePickerOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </button>
+
+              {/* Dropdown */}
+              {worktreePickerOpen && (
+                <div className="mt-1.5 rounded-lg border border-zinc-800 bg-[#0a0a10] shadow-lg overflow-hidden">
+                  {nonMainWorktrees.length > 5 && (
+                    <div className="p-2 border-b border-zinc-800/50">
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Filter worktrees..."
+                        value={worktreeFilter}
+                        onChange={(e) => {
+                          setWorktreeFilter(e.target.value);
+                          setHighlightedWorktree(0);
+                        }}
+                        onKeyDown={handleWorktreeFilterKeyDown}
+                        className="w-full px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-hidden focus:border-zinc-600 transition-colors"
+                      />
+                    </div>
+                  )}
+                  <div ref={worktreeListRef} className="max-h-52 overflow-y-auto divide-y divide-zinc-800/30">
+                    {/* "None" option */}
+                    <button
+                      onClick={() => selectWorktree("")}
+                      onMouseEnter={() => setHighlightedWorktree(-1)}
+                      className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                        highlightedWorktree === -1 && !selectedWorktree ? "bg-blue-500/15 text-zinc-200" : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      None — create new or use main
+                    </button>
+                    {filteredWorktrees.map((w, i) => {
+                      const label = w.branch || w.path.split("/").pop() || "";
+                      const isActive = selectedWorktree === w.path;
+                      return (
+                        <button
+                          key={w.path}
+                          onClick={() => selectWorktree(w.path)}
+                          onMouseEnter={() => setHighlightedWorktree(i)}
+                          className={`w-full text-left px-3 py-2 transition-colors ${
+                            highlightedWorktree === i ? "bg-blue-500/15" : ""
+                          }`}
+                        >
+                          <span className={`text-sm font-(family-name:--font-geist-mono) ${isActive ? "text-blue-300" : "text-zinc-200"}`}>
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {filteredWorktrees.length === 0 && worktreeFilter && (
+                      <div className="px-3 py-3 text-sm text-zinc-600 text-center">No matching worktrees</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

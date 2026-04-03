@@ -12,7 +12,7 @@ const fetcher = (url: string) =>
     return r.json();
   });
 
-export function useSessions() {
+export function useSessions(paused = false) {
   const pathname = usePathname();
   const isOnDashboard = pathname === "/";
 
@@ -33,7 +33,7 @@ export function useSessions() {
     isOnDashboard ? "/api/sessions" : null,
     fetcher,
     {
-      refreshInterval: pollInterval,
+      refreshInterval: paused ? 0 : pollInterval,
       revalidateOnFocus: false,
       keepPreviousData: true,
     },
