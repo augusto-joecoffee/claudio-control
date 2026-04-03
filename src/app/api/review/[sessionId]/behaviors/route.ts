@@ -69,18 +69,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 		}
 	}
 
-	// Before returning "pending", check if Claude already responded in the JSONL
-	// (e.g., from a previous analyze attempt whose cache was cleared)
-	const existingResponse = await pollForResponse(sessionId);
-	if (existingResponse) {
-		const analysis = parseClaudeResponse(existingResponse, sessionId, fingerprint, 0);
-		if (analysis.behaviors.length > 0) {
-			await saveBehaviorAnalysis(sessionId, analysis);
-			return NextResponse.json({ ...analysis, status: "complete", stale: false });
+	// If there's a cached analysis with a DIFFERENT fingerprint, it's stale.
+	// Don't reuse old JSONL responses — they're for the old diff.
+	// Return "pending" so the frontend triggers a fresh analysis.
+	//
+	// If there's NO cached analysis at all (first time), also check the JSONL
+	// in case Claude already responded from a recent analyze trigger whose
+	// cache was lost (e.g., server restart during processing).
+	if (!cached) {
+		const existingResponse = await pollForResponse(sessionId);
+		if (existingResponse) {
+			const analysis = parseClaudeResponse(existingResponse, sessionId, fingerprint, 0);
+			if (analysis.behaviors.length > 0) {
+				await saveBehaviorAnalysis(sessionId, analysis);
+				return NextResponse.json({ ...analysis, status: "complete", stale: false });
+			}
 		}
 	}
 
-	// No cached analysis and no JSONL response → pending
+	// Stale cache or no analysis → pending (triggers fresh analysis)
 	return NextResponse.json({ status: "pending", stale: false, behaviors: [], orphanedSymbols: [], warnings: [] });
 }
 
