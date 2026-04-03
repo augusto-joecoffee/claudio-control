@@ -68,7 +68,7 @@ export default function ReviewPage() {
 	const [selectedBehaviorId, setSelectedBehaviorId] = useState<string | null>(null);
 	const isBehaviorMode = reviewMode === "behavior";
 
-	const { behaviors, orphanedSymbols, warnings: behaviorWarnings, isLoading: behaviorsLoading } = useBehaviors(sessionId, isBehaviorMode);
+	const { behaviors, orphanedSymbols, warnings: behaviorWarnings, isLoading: behaviorsLoading, isAnalyzing } = useBehaviors(sessionId, isBehaviorMode);
 	const { behavior: selectedBehavior, isLoading: behaviorDetailLoading } = useBehaviorDetail(sessionId, isBehaviorMode ? selectedBehaviorId : null);
 	const { isReviewed: isFlowReviewed, toggleReviewed: toggleFlowReviewed, reviewedCount: flowReviewedCount } = useFlowReviewProgress(sessionId);
 
@@ -321,7 +321,7 @@ export default function ReviewPage() {
 				reviewMode={reviewMode}
 				onSetReviewMode={handleSetReviewMode}
 				behaviorCount={behaviors.length}
-				isBehaviorLoading={behaviorsLoading}
+				isBehaviorLoading={behaviorsLoading || isAnalyzing}
 			/>
 
 			{/* Main content */}
@@ -391,10 +391,11 @@ export default function ReviewPage() {
 					) : (
 						<div className="flex-1 flex items-center justify-center text-zinc-600">
 							<div className="text-center">
-								{behaviorsLoading ? (
+								{behaviorsLoading || isAnalyzing ? (
 									<>
 										<div className="w-5 h-5 mx-auto mb-2 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
-										<div className="text-xs">Analyzing code flows...</div>
+										<div className="text-xs">{isAnalyzing ? "Claude is analyzing the code flows..." : "Loading..."}</div>
+										{isAnalyzing && <div className="text-[10px] text-zinc-700 mt-1">This may take 15-30 seconds</div>}
 									</>
 								) : behaviors.length > 0 ? (
 									<>
