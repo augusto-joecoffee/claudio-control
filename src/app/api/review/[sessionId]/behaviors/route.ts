@@ -44,27 +44,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 		}
 
 		if (isProcessing) {
-			// Analysis is in progress — try to read the response from JSONL
-			const analysisIdTag = cached.warnings.find((w) => w.startsWith("__analysisId__:"));
 			const sentAtTag = cached.warnings.find((w) => w.startsWith("__sentAt__:"));
-			const analysisId = analysisIdTag?.split(":").slice(1).join(":") ?? "";
 			const sentAt = sentAtTag ? parseInt(sentAtTag.split(":")[1], 10) : 0;
 
-			// Check for timeout (180 seconds)
-			if (sentAt && Date.now() - sentAt > 180_000) {
-				// Timeout — clear the processing marker
-				const timedOut = {
-					...cached,
-					warnings: ["Analysis timed out. Try again."],
-				};
+			// Check for timeout (300 seconds — Claude may do many tool calls)
+			if (sentAt && Date.now() - sentAt > 300_000) {
+				const timedOut = { ...cached, warnings: ["Analysis timed out. Try again."] };
 				await saveBehaviorAnalysis(sessionId, timedOut);
 				return NextResponse.json({ ...timedOut, status: "error", stale: false });
 			}
 
 			// Try to find Claude's response in the JSONL
-			const response = await pollForResponse(sessionId, analysisId);
+			// Look for ANY behavior analysis response, not just the one matching our ID
+			const response = await pollForResponse(sessionId);
 			if (response) {
-				// Parse Claude's response into BehaviorAnalysis
 				const elapsed = sentAt ? Date.now() - sentAt : 0;
 				const analysis = parseClaudeResponse(response, sessionId, fingerprint, elapsed);
 				await saveBehaviorAnalysis(sessionId, analysis);
@@ -89,9 +82,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
  * and assistant (tool_use/text) messages. We need to find the LAST assistant
  * text block that contains the JSON response, scanning past all the tool calls.
  */
-async function pollForResponse(sessionId: string, analysisId: string): Promise<string | null> {
-	if (!analysisId) return null;
-
+async function pollForResponse(sessionId: string): Promise<string | null> {
 	try {
 		const sessions = await discoverSessions();
 		const session = sessions.find((s) => s.id === sessionId);
@@ -100,40 +91,28 @@ async function pollForResponse(sessionId: string, analysisId: string): Promise<s
 		const lines = await readFullConversation(session.jsonlPath);
 		const conversation = linesToConversation(lines);
 
-		// Find the prompt by its [id:xxx] tag
-		const tag = `[id:${analysisId}]`;
+		// Find the LAST behavior analysis prompt (any ID)
 		const promptIdx = conversation.findLastIndex(
-			(m) => m.type === "user" && m.text?.includes(tag),
+			(m) => m.type === "user" && m.text?.includes("[Behavior Analysis]"),
 		);
 
 		if (promptIdx < 0) return null;
 
-		// Scan ALL messages after the prompt (don't stop at user messages —
-		// tool_result messages are type "user" and we need to scan past them).
-		// Look for the last assistant text that contains JSON (starts with { or has "flows").
+		// Scan ALL messages after the prompt for the last assistant text with JSON.
+		// Don't stop at user messages — Claude makes tool calls (Bash, Read) which
+		// create interleaved user (tool_result) and assistant (tool_use) entries.
 		let lastJsonText: string | null = null;
-		let lastText: string | null = null;
 
 		for (let i = promptIdx + 1; i < conversation.length; i++) {
 			const m = conversation[i];
-			// Stop if we hit a REAL user message (not a tool_result)
-			// Real user messages have string content, tool_results have array content
-			// In linesToConversation, tool_results are filtered out, so any user
-			// message here is a real human message → stop
-			if (m.type === "user" && m.text && !m.text.startsWith("[{") && m.toolUses.length === 0) {
-				break;
-			}
 			if (m.type === "assistant" && m.text) {
-				lastText = m.text;
-				// Check if this text contains JSON (the actual response)
-				if (m.text.includes('"flows"') || m.text.trim().startsWith("{")) {
+				if (m.text.includes('"flows"')) {
 					lastJsonText = m.text;
 				}
 			}
 		}
 
-		// Prefer the JSON-containing text, fall back to last assistant text
-		return lastJsonText ?? lastText;
+		return lastJsonText;
 	} catch {
 		return null;
 	}
