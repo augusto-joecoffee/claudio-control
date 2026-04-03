@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadConfig } from "@/lib/config";
 import { getDefaultBranch, getMergeBase } from "@/lib/review-diff";
+import { getPrBaseBranch } from "@/lib/git-info";
 import { loadReview, saveReview } from "@/lib/review-store";
 import { discoverSessions } from "@/lib/discovery";
 import type { ReviewSession } from "@/lib/types";
@@ -10,31 +11,36 @@ export const dynamic = "force-dynamic";
 export async function GET(_request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
 	const { sessionId } = await params;
 
-	// Return existing review if it exists
+	// Always look up the live session so we can validate the working directory
+	const sessions = await discoverSessions();
+	const session = sessions.find((s) => s.id === sessionId);
+
 	const existing = await loadReview(sessionId);
 	if (existing) {
-		// Backfill prUrl if missing (reviews created before this field was added)
-		if (!existing.prUrl) {
-			const sessions = await discoverSessions();
-			const session = sessions.find((s) => s.id === sessionId);
-			if (session?.prUrl) {
+		// If the session's working directory changed (e.g. session ID reused across
+		// repos, or a worktree moved), the cached review is stale — re-initialize below.
+		if (!session || existing.workingDirectory === session.workingDirectory) {
+			// Backfill prUrl if missing (reviews created before this field was added)
+			if (session?.prUrl && !existing.prUrl) {
 				existing.prUrl = session.prUrl;
 				await saveReview(sessionId, existing);
 			}
+			return NextResponse.json(existing);
 		}
-		return NextResponse.json(existing);
 	}
-
-	// Find the session to get its working directory
-	const sessions = await discoverSessions();
-	const session = sessions.find((s) => s.id === sessionId);
 	if (!session) {
 		return NextResponse.json({ error: "Session not found" }, { status: 404 });
 	}
 
 	const cwd = session.workingDirectory;
 	const config = await loadConfig();
-	const baseBranch = config.defaultBaseBranch || (await getDefaultBranch(cwd));
+
+	// Prefer the PR's actual base branch (e.g. feature-nx) over the repo default (main).
+	// This avoids showing thousands of irrelevant commits when a branch targets
+	// an intermediate branch rather than main.
+	const branch = session.branch;
+	const prBase = branch ? await getPrBaseBranch(cwd, branch) : null;
+	const baseBranch = prBase || config.defaultBaseBranch || (await getDefaultBranch(cwd));
 	const mergeBase = await getMergeBase(cwd, baseBranch);
 
 	if (!mergeBase) {
