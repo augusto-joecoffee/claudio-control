@@ -1,10 +1,17 @@
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { POLL_INTERVAL_MS } from "@/lib/constants";
 import { ClaudeSession } from "@/lib/types";
 
 const BACKGROUND_MULTIPLIER = 3;
+const REPO_IDS_CACHE_KEY = "claude-control:repo-ids";
+
+function getCachedRepoIds(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(REPO_IDS_CACHE_KEY) || "{}");
+  } catch { return {}; }
+}
 
 const fetcher = (url: string) =>
   fetch(url).then((r) => {
@@ -39,10 +46,18 @@ export function useSessions(paused = false) {
     },
   );
 
+  // Cache repoIds to localStorage so they're available on first render
+  const cachedRepoIds = useRef(getCachedRepoIds());
+  const serverRepoIds = data?.repoIds;
+  if (serverRepoIds && Object.keys(serverRepoIds).length > 0) {
+    cachedRepoIds.current = serverRepoIds;
+    try { localStorage.setItem(REPO_IDS_CACHE_KEY, JSON.stringify(serverRepoIds)); } catch {}
+  }
+
   return {
     sessions: data?.sessions ?? [],
     hooksActive: data?.hooksActive ?? false,
-    repoIds: data?.repoIds ?? {},
+    repoIds: serverRepoIds ?? cachedRepoIds.current,
     error,
     isLoading,
     refresh: mutate,
