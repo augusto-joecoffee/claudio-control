@@ -133,8 +133,8 @@ export interface ImpactGraph {
 	neighborhood: Map<SymbolId, SymbolNode>;
 	/** Edges within the neighborhood subgraph. */
 	edges: GraphEdge[];
-	/** Entrypoints that can reach a changed symbol (upstream). */
-	affectedEntrypoints: SymbolId[];
+	/** For each changed symbol, the nearest entrypoint that reaches it (upstream context). */
+	nearestEntrypoints: Map<SymbolId, SymbolId>;
 	/** Side effects reachable from changed nodes (downstream). */
 	affectedSideEffects: Array<{ symbolId: SymbolId; effects: SideEffect[] }>;
 }

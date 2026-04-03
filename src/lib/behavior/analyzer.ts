@@ -120,7 +120,7 @@ export async function analyzeWithTypeScript(
 
 		// Layer 3 (cont): Extract impact graph
 		const impact = extractImpactGraph(graph, anchors, 4);
-		warnings.push(`Impact: ${impact.neighborhood.size} nodes in neighborhood, ${impact.affectedEntrypoints.length} entrypoints, ${impact.affectedSideEffects.length} side-effect nodes.`);
+		warnings.push(`Impact: ${impact.neighborhood.size} nodes in neighborhood, ${impact.nearestEntrypoints.size} nearest entrypoints, ${impact.affectedSideEffects.length} side-effect nodes.`);
 
 		// Layer 4: Derive reviewer flows
 		const { flows, orphanedSymbolIds } = deriveFlows(impact, graph);

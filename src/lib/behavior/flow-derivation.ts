@@ -1,12 +1,15 @@
 /**
- * Layer 4: Behavior Flow Derivation
+ * Layer 4: Behavior Flow Derivation (Change-Centric)
  *
- * Transforms the PR Impact Graph into reviewer-friendly flows.
- * Produces the Reviewer Flow Graph (Graph 3).
+ * Produces reviewer flows centered on WHAT CHANGED, not what's affected.
  *
- * Strategy: For each affected entrypoint, trace outbound call edges through
- * the pre-computed impact graph. Filter to keep only steps the reviewer cares
- * about. Collapse wrapper chains. Order by call depth.
+ * Strategy:
+ *   1. Group changed symbols by file proximity and call relationship
+ *   2. For each group, build a flow:
+ *      - Context: nearest entrypoint (1 step, for orientation)
+ *      - Core: the changed code in execution order
+ *      - Consequences: downstream side effects
+ *   3. Name the flow after the primary change, not every possible caller
  */
 
 import type { EntrypointKind, ConfidenceLevel, SideEffect } from "../types";
@@ -16,29 +19,30 @@ import type {
 } from "./graph-types";
 import { parseSymbolId } from "./graph-types";
 
-const MAX_TRACE_DEPTH = 12;
-const MAX_RAW_STEPS = 60;
+const MAX_DOWNSTREAM_DEPTH = 6;
 const MAX_DISPLAY_STEPS = 20;
 
+// ── Public API ──
+
 /**
- * Derive reviewer flows from the impact graph.
- * Each affected entrypoint gets one flow.
- * Returns orphaned symbol IDs (changed but not reachable from any entrypoint).
+ * Derive reviewer flows centered on what the PR actually changes.
+ * Groups related changes, then builds a flow per group showing:
+ * context entrypoint → changed code → downstream consequences.
  */
 export function deriveFlows(
 	impact: ImpactGraph,
 	fullGraph: SemanticCodeGraph,
 ): { flows: ReviewerFlow[]; orphanedSymbolIds: SymbolId[] } {
+	// Step 1: Group changed symbols into coherent behaviors
+	const groups = groupChangedSymbols(impact, fullGraph);
+
+	// Step 2: Build a flow per group
 	const flows: ReviewerFlow[] = [];
 	const tracedSymbols = new Set<SymbolId>();
 
-	for (const epId of impact.affectedEntrypoints) {
-		const epNode = fullGraph.nodes.get(epId) ?? impact.neighborhood.get(epId);
-		if (!epNode || !epNode.entrypointKind) continue;
-
-		const flow = buildSingleFlow(epId, epNode, impact, fullGraph);
+	for (const group of groups) {
+		const flow = buildChangeFlow(group, impact, fullGraph);
 		if (!flow || flow.steps.length === 0) continue;
-
 		flows.push(flow);
 		for (const step of flow.steps) {
 			tracedSymbols.add(step.node.id);
@@ -56,63 +60,240 @@ export function deriveFlows(
 	return { flows, orphanedSymbolIds };
 }
 
+// ── Change Grouping ──
+
+interface ChangeGroup {
+	/** Primary changed symbol (the "lead" of this group). */
+	primary: SymbolId;
+	/** All changed symbols in this group. */
+	members: SymbolId[];
+	/** Nearest entrypoint for context (if found). */
+	entrypointId: SymbolId | null;
+	/** The file that most members belong to. */
+	primaryFile: string;
+}
+
 /**
- * Build a single flow from an entrypoint through the impact graph.
+ * Group changed symbols into coherent behaviors.
+ *
+ * Grouping rules:
+ * - Changed symbols in the same file → same group
+ * - Changed symbols that call each other (connected via edges) → merge groups
+ * - Changed symbols that share the same nearest entrypoint → merge groups
  */
-function buildSingleFlow(
-	entrypointId: SymbolId,
-	entrypointNode: SymbolNode,
+function groupChangedSymbols(impact: ImpactGraph, fullGraph: SemanticCodeGraph): ChangeGroup[] {
+	const changedIds = Array.from(impact.changed.keys());
+	if (changedIds.length === 0) return [];
+
+	// Union-Find for grouping
+	const parent = new Map<SymbolId, SymbolId>();
+	for (const id of changedIds) parent.set(id, id);
+
+	function find(x: SymbolId): SymbolId {
+		while (parent.get(x) !== x) {
+			const p = parent.get(parent.get(x)!)!;
+			parent.set(x, p);
+			x = p;
+		}
+		return x;
+	}
+	function union(a: SymbolId, b: SymbolId) {
+		const ra = find(a), rb = find(b);
+		if (ra !== rb) parent.set(ra, rb);
+	}
+
+	// Rule 1: Same file → merge
+	const byFile = new Map<string, SymbolId[]>();
+	for (const id of changedIds) {
+		const node = impact.changed.get(id)?.resolvedNode;
+		if (!node) continue;
+		const list = byFile.get(node.filePath) ?? [];
+		list.push(id);
+		byFile.set(node.filePath, list);
+	}
+	for (const [, ids] of byFile) {
+		for (let i = 1; i < ids.length; i++) {
+			union(ids[0], ids[i]);
+		}
+	}
+
+	// Rule 2: Call each other → merge
+	const changedSet = new Set(changedIds);
+	for (const edge of impact.edges) {
+		if (changedSet.has(edge.from) && changedSet.has(edge.to)) {
+			union(edge.from, edge.to);
+		}
+	}
+	// Also check full graph edges between changed symbols
+	for (const id of changedIds) {
+		const outEdges = fullGraph.outbound.get(id) ?? [];
+		for (const edge of outEdges) {
+			if (changedSet.has(edge.to)) union(id, edge.to);
+		}
+	}
+
+	// Rule 3: Share nearest entrypoint → merge
+	const byEntrypoint = new Map<SymbolId, SymbolId[]>();
+	for (const id of changedIds) {
+		const ep = impact.nearestEntrypoints.get(id);
+		if (!ep) continue;
+		const list = byEntrypoint.get(ep) ?? [];
+		list.push(id);
+		byEntrypoint.set(ep, list);
+	}
+	for (const [, ids] of byEntrypoint) {
+		for (let i = 1; i < ids.length; i++) {
+			union(ids[0], ids[i]);
+		}
+	}
+
+	// Collect groups
+	const groupMap = new Map<SymbolId, SymbolId[]>();
+	for (const id of changedIds) {
+		const root = find(id);
+		const list = groupMap.get(root) ?? [];
+		list.push(id);
+		groupMap.set(root, list);
+	}
+
+	// Build ChangeGroup objects
+	const groups: ChangeGroup[] = [];
+	for (const [, members] of groupMap) {
+		// Pick primary: prefer entrypoints, then most-changed, then first
+		const primary = pickPrimary(members, impact, fullGraph);
+
+		// Find nearest entrypoint for any member
+		let entrypointId: SymbolId | null = null;
+		for (const id of members) {
+			const ep = impact.nearestEntrypoints.get(id);
+			if (ep) { entrypointId = ep; break; }
+		}
+
+		// Primary file: most common file in the group
+		const fileCounts = new Map<string, number>();
+		for (const id of members) {
+			const node = impact.changed.get(id)?.resolvedNode;
+			if (node) fileCounts.set(node.filePath, (fileCounts.get(node.filePath) ?? 0) + 1);
+		}
+		let primaryFile = "";
+		let maxCount = 0;
+		for (const [f, c] of fileCounts) {
+			if (c > maxCount) { maxCount = c; primaryFile = f; }
+		}
+
+		groups.push({ primary, members, entrypointId, primaryFile });
+	}
+
+	// Sort: largest groups first (most important changes)
+	groups.sort((a, b) => b.members.length - a.members.length);
+
+	return groups;
+}
+
+function pickPrimary(members: SymbolId[], impact: ImpactGraph, fullGraph: SemanticCodeGraph): SymbolId {
+	// Prefer a member that IS an entrypoint
+	for (const id of members) {
+		const node = impact.changed.get(id)?.resolvedNode ?? fullGraph.nodes.get(id);
+		if (node?.entrypointKind) return id;
+	}
+	// Prefer a member that is exported
+	for (const id of members) {
+		const node = impact.changed.get(id)?.resolvedNode ?? fullGraph.nodes.get(id);
+		if (node?.isExported) return id;
+	}
+	return members[0];
+}
+
+// ── Flow Building ──
+
+/**
+ * Build a single flow for a change group.
+ *
+ * Structure:
+ *   [Context: nearest entrypoint] → [Changed code in order] → [Downstream side effects]
+ */
+function buildChangeFlow(
+	group: ChangeGroup,
 	impact: ImpactGraph,
 	fullGraph: SemanticCodeGraph,
 ): ReviewerFlow | null {
-	// Build a local edge index for the impact graph
-	const outbound = new Map<SymbolId, GraphEdge[]>();
-	for (const edge of impact.edges) {
-		if (edge.kind !== "calls" && edge.kind !== "inferred-call") continue;
-		const list = outbound.get(edge.from) ?? [];
-		list.push(edge);
-		outbound.set(edge.from, list);
-	}
+	const steps: FlowStep[] = [];
 
-	// Also include edges from the full graph for the neighborhood nodes
-	for (const [id] of impact.neighborhood) {
-		const fullEdges = fullGraph.outbound.get(id) ?? [];
-		for (const edge of fullEdges) {
-			if (edge.kind !== "calls" && edge.kind !== "inferred-call") continue;
-			if (!impact.neighborhood.has(edge.to)) continue;
-			const list = outbound.get(edge.from) ?? [];
-			if (!list.some((e) => e.to === edge.to)) {
-				list.push(edge);
-				outbound.set(edge.from, list);
+	// Step 0 (optional): Nearest entrypoint as context
+	let entrypointNode: SymbolNode | null = null;
+	let entrypointKind: EntrypointKind = "exported-function";
+
+	if (group.entrypointId) {
+		const epNode = fullGraph.nodes.get(group.entrypointId);
+		if (epNode) {
+			entrypointNode = epNode;
+			entrypointKind = epNode.entrypointKind ?? "exported-function";
+
+			// Only add as a step if it's not already a changed member
+			if (!group.members.includes(group.entrypointId)) {
+				steps.push({
+					node: epNode,
+					order: 0,
+					sideEffects: epNode.sideEffects,
+					callsTo: (fullGraph.outbound.get(group.entrypointId) ?? []).map((e) => e.to),
+					isChanged: false,
+					changeKind: null,
+					rationale: "Entry point (context)",
+					confidence: "high",
+				});
 			}
 		}
 	}
 
-	// DFS trace from entrypoint
-	const rawSteps: RawFlowStep[] = [];
-	const visited = new Set<SymbolId>();
+	// Core: Changed symbols in this group, ordered by file then line number
+	const changedNodes: Array<{ id: SymbolId; node: SymbolNode; anchor: DiffAnchor }> = [];
+	for (const id of group.members) {
+		const anchor = impact.changed.get(id);
+		const node = anchor?.resolvedNode ?? fullGraph.nodes.get(id);
+		if (node && anchor) changedNodes.push({ id, node, anchor });
+	}
 
-	traceFromEntrypoint(entrypointId, rawSteps, visited, 0, outbound, impact, fullGraph);
+	// Sort by file path then line number (approximation of execution order)
+	changedNodes.sort((a, b) => {
+		if (a.node.filePath !== b.node.filePath) return a.node.filePath.localeCompare(b.node.filePath);
+		return a.node.line - b.node.line;
+	});
 
-	if (rawSteps.length === 0) return null;
+	for (const { id, node, anchor } of changedNodes) {
+		steps.push({
+			node,
+			order: steps.length,
+			sideEffects: node.sideEffects,
+			callsTo: (fullGraph.outbound.get(id) ?? []).map((e) => e.to),
+			isChanged: true,
+			changeKind: anchor.changeKind,
+			rationale: "Modified by this diff",
+			confidence: anchor.confidence,
+		});
+	}
 
-	// Filter to relevant steps
-	const filtered = filterRelevantSteps(rawSteps, impact, outbound);
-	if (filtered.length === 0) return null;
+	// Downstream: Side effects reachable from changed code (not already in steps)
+	const stepIds = new Set(steps.map((s) => s.node.id));
+	const downstreamSteps = traceDownstreamSideEffects(group.members, stepIds, impact, fullGraph);
+	for (const ds of downstreamSteps) {
+		if (steps.length >= MAX_DISPLAY_STEPS) break;
+		steps.push({
+			...ds,
+			order: steps.length,
+		});
+	}
 
-	// Build FlowStep objects
-	const steps: FlowStep[] = filtered.map((raw, i) => ({
-		node: raw.node,
-		order: i,
-		sideEffects: raw.node.sideEffects,
-		callsTo: raw.calleeIds,
-		isChanged: impact.changed.has(raw.node.id),
-		changeKind: impact.changed.get(raw.node.id)?.changeKind ?? null,
-		rationale: buildRationale(raw, impact),
-		confidence: raw.confidence,
-	}));
+	if (steps.length === 0) return null;
 
-	// Aggregate side effects
+	// If no entrypoint found, use the primary changed symbol
+	if (!entrypointNode) {
+		const primaryNode = impact.changed.get(group.primary)?.resolvedNode ?? fullGraph.nodes.get(group.primary);
+		if (!primaryNode) return null;
+		entrypointNode = primaryNode;
+		entrypointKind = primaryNode.entrypointKind ?? "exported-function";
+	}
+
+	// Aggregate
 	const sideEffectKeys = new Set<string>();
 	const aggregateSideEffects: SideEffect[] = [];
 	const touchedFiles = new Set<string>();
@@ -135,126 +316,98 @@ function buildSingleFlow(
 
 	return {
 		entrypoint: entrypointNode,
-		entrypointKind: entrypointNode.entrypointKind!,
+		entrypointKind,
 		steps,
 		sideEffects: aggregateSideEffects,
 		touchedFiles: Array.from(touchedFiles),
 		confidence,
-		name: nameBehavior(entrypointNode),
+		name: nameFlow(group, impact, fullGraph),
 	};
 }
 
-// ── DFS Trace ──
+// ── Downstream Side Effects ──
 
-interface RawFlowStep {
-	node: SymbolNode;
-	depth: number;
-	calleeIds: SymbolId[];
-	confidence: ConfidenceLevel;
-}
-
-function traceFromEntrypoint(
-	nodeId: SymbolId,
-	steps: RawFlowStep[],
-	visited: Set<SymbolId>,
-	depth: number,
-	outbound: Map<SymbolId, GraphEdge[]>,
+function traceDownstreamSideEffects(
+	startIds: SymbolId[],
+	alreadyIncluded: Set<SymbolId>,
 	impact: ImpactGraph,
 	fullGraph: SemanticCodeGraph,
-): void {
-	if (depth > MAX_TRACE_DEPTH || steps.length >= MAX_RAW_STEPS) return;
-	if (visited.has(nodeId)) return;
-	visited.add(nodeId);
+): FlowStep[] {
+	const results: FlowStep[] = [];
+	const visited = new Set<SymbolId>(alreadyIncluded);
+	let frontier = new Set(startIds.filter((id) => !visited.has(id)));
 
-	const node = impact.neighborhood.get(nodeId) ?? fullGraph.nodes.get(nodeId);
-	if (!node) return;
+	// Also start from already-included changed nodes
+	for (const id of startIds) frontier.add(id);
 
-	const edges = outbound.get(nodeId) ?? [];
-	const calleeIds = edges.map((e) => e.to);
+	for (let depth = 0; depth < MAX_DOWNSTREAM_DEPTH && frontier.size > 0; depth++) {
+		const nextFrontier = new Set<SymbolId>();
+		for (const nodeId of frontier) {
+			const outEdges = fullGraph.outbound.get(nodeId) ?? [];
+			for (const edge of outEdges) {
+				if (visited.has(edge.to)) continue;
+				visited.add(edge.to);
 
-	// Edge confidence affects step confidence
-	const worstEdgeConf = edges.length > 0
-		? edges.reduce<ConfidenceLevel>((acc, e) => {
-			const rank = { high: 2, medium: 1, low: 0 };
-			return rank[e.confidence] < rank[acc] ? e.confidence : acc;
-		}, "high")
-		: node.confidence;
+				const node = fullGraph.nodes.get(edge.to);
+				if (!node) continue;
 
-	const stepConf: ConfidenceLevel = depth === 0
-		? node.confidence
-		: minConf(node.confidence, worstEdgeConf);
+				// Only include if it has side effects
+				if (node.sideEffects.length > 0) {
+					results.push({
+						node,
+						order: 0, // will be set by caller
+						sideEffects: node.sideEffects,
+						callsTo: (fullGraph.outbound.get(edge.to) ?? []).map((e) => e.to),
+						isChanged: impact.changed.has(edge.to),
+						changeKind: impact.changed.get(edge.to)?.changeKind ?? null,
+						rationale: "Downstream side effect",
+						confidence: edge.confidence,
+					});
+				}
 
-	steps.push({ node, depth, calleeIds, confidence: stepConf });
-
-	// Recurse into callees
-	for (const edge of edges) {
-		traceFromEntrypoint(edge.to, steps, visited, depth + 1, outbound, impact, fullGraph);
-	}
-}
-
-// ── Step Filtering ──
-
-/**
- * Filter raw traced steps to keep only what the reviewer should see.
- *
- * Keep:
- * - Entrypoint (depth 0)
- * - Changed nodes
- * - Nodes with side effects
- * - Bridge nodes connecting kept nodes
- * Drop everything else.
- */
-function filterRelevantSteps(
-	rawSteps: RawFlowStep[],
-	impact: ImpactGraph,
-	outbound: Map<SymbolId, GraphEdge[]>,
-): RawFlowStep[] {
-	if (rawSteps.length <= MAX_DISPLAY_STEPS) return rawSteps;
-
-	const keepIndices = new Set<number>();
-
-	// Always keep entrypoint
-	keepIndices.add(0);
-
-	// Keep changed and side-effect nodes
-	for (let i = 0; i < rawSteps.length; i++) {
-		const step = rawSteps[i];
-		if (impact.changed.has(step.node.id)) keepIndices.add(i);
-		if (step.node.sideEffects.length > 0) keepIndices.add(i);
-	}
-
-	// Keep bridge nodes: direct callers/callees of kept nodes
-	const idToIndex = new Map<SymbolId, number>();
-	for (let i = 0; i < rawSteps.length; i++) {
-		idToIndex.set(rawSteps[i].node.id, i);
-	}
-
-	const bridgePass = new Set(keepIndices);
-	for (const idx of keepIndices) {
-		const step = rawSteps[idx];
-		// Callees
-		for (const calleeId of step.calleeIds) {
-			const cIdx = idToIndex.get(calleeId);
-			if (cIdx !== undefined) bridgePass.add(cIdx);
-		}
-		// Callers (look backwards)
-		for (let j = 0; j < rawSteps.length; j++) {
-			if (rawSteps[j].calleeIds.includes(step.node.id)) {
-				bridgePass.add(j);
-				break;
+				nextFrontier.add(edge.to);
 			}
 		}
+		frontier = nextFrontier;
 	}
 
-	return Array.from(bridgePass)
-		.sort((a, b) => a - b)
-		.slice(0, MAX_DISPLAY_STEPS)
-		.map((i) => rawSteps[i]);
+	return results;
 }
 
-// ── Naming ──
+// ── Flow Naming ──
 
-function nameBehavior(node: SymbolNode): string {
+/**
+ * Name the flow after what changed, not after every possible caller.
+ * If the primary change IS an entrypoint, use the entrypoint naming.
+ * Otherwise, use the primary symbol's name + file context.
+ */
+function nameFlow(group: ChangeGroup, impact: ImpactGraph, fullGraph: SemanticCodeGraph): string {
+	const primaryNode = impact.changed.get(group.primary)?.resolvedNode ?? fullGraph.nodes.get(group.primary);
+	if (!primaryNode) return parseSymbolId(group.primary).qualifiedName;
+
+	// If primary is an entrypoint, use entrypoint-style naming
+	if (primaryNode.entrypointKind) {
+		return nameEntrypoint(primaryNode);
+	}
+
+	// If there's a known entrypoint, show "entrypoint → primary"
+	if (group.entrypointId) {
+		const epNode = fullGraph.nodes.get(group.entrypointId);
+		if (epNode) {
+			const epName = nameEntrypoint(epNode);
+			return `${epName} → ${primaryNode.name}`;
+		}
+	}
+
+	// Fallback: file name context + function name
+	const fileName = primaryNode.filePath.split("/").pop()?.replace(/\.\w+$/, "") ?? "";
+	if (group.members.length > 1) {
+		return `${fileName}: ${primaryNode.name} (+${group.members.length - 1})`;
+	}
+	return `${fileName}: ${primaryNode.name}`;
+}
+
+function nameEntrypoint(node: SymbolNode): string {
 	const fileName = node.filePath.split("/").pop() ?? "";
 	const jobName = fileName.replace(/\.(job|worker|cron)\.(ts|js)$/, "");
 
@@ -271,16 +424,12 @@ function nameBehavior(node: SymbolNode): string {
 			return `test: ${jobName}`;
 		case "react-component":
 			return `<${node.name} />`;
-		case "event-handler":
-			return `on: ${node.name}`;
 		case "queue-consumer": {
 			if (/^(perform|prePerform|postPerform|execute|run|handle|process)$/.test(node.name)) {
 				return `job: ${jobName}.${node.name}`;
 			}
 			return `job: ${node.name}`;
 		}
-		case "cli-command":
-			return `cmd: ${node.name}`;
 		case "cron-job": {
 			if (/^(perform|prePerform|postPerform|execute|run|handle)$/.test(node.name)) {
 				return `cron: ${jobName}.${node.name}`;
@@ -290,17 +439,4 @@ function nameBehavior(node: SymbolNode): string {
 		default:
 			return node.qualifiedName ?? node.name;
 	}
-}
-
-function buildRationale(step: RawFlowStep, impact: ImpactGraph): string {
-	if (step.depth === 0) return "Entry point";
-	if (impact.changed.has(step.node.id)) return "Modified by this diff";
-	if (step.node.sideEffects.length > 0) return "Has side effects";
-	return "Called on the path to modified code";
-}
-
-function minConf(a: ConfidenceLevel, b: ConfidenceLevel): ConfidenceLevel {
-	const rank = { high: 2, medium: 1, low: 0 };
-	const m = Math.min(rank[a], rank[b]);
-	return m === 2 ? "high" : m === 1 ? "medium" : "low";
 }

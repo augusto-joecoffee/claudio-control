@@ -10,7 +10,7 @@
 
 import { SyntaxKind, Node } from "ts-morph";
 import type { Project } from "ts-morph";
-import type { ConfidenceLevel } from "../types";
+import type { ConfidenceLevel, SideEffect } from "../types";
 import type {
 	SemanticCodeGraph, SymbolNode, SymbolId, GraphEdge, EdgeKind,
 	ImpactGraph, DiffAnchor,
@@ -201,9 +201,9 @@ function resolveCallTarget(
 /**
  * Extract the PR Impact Graph (Graph 2) by walking outward from changed nodes.
  *
- * Walks UPSTREAM (callers, via inbound edges) to find affected entrypoints.
- * Walks DOWNSTREAM (callees, via outbound edges) to find affected side effects.
- * Collects the neighborhood subgraph within maxHops.
+ * UPSTREAM: For each changed symbol, find only the NEAREST entrypoint (not all).
+ *   This provides context ("called from job X") without creating 40+ flows.
+ * DOWNSTREAM: Find side effects reachable from changed code (unchanged).
  */
 export function extractImpactGraph(
 	fullGraph: SemanticCodeGraph,
@@ -213,54 +213,68 @@ export function extractImpactGraph(
 	const changed = new Map<SymbolId, DiffAnchor>();
 	const neighborhood = new Map<SymbolId, SymbolNode>();
 	const impactEdges: GraphEdge[] = [];
-	const affectedEntrypoints: SymbolId[] = [];
-	const affectedSideEffects: Array<{ symbolId: SymbolId; effects: typeof fullGraph extends never ? never : any[] }> = [];
+	const nearestEntrypoints = new Map<SymbolId, SymbolId>();
+	const affectedSideEffects: Array<{ symbolId: SymbolId; effects: SideEffect[] }> = [];
 
 	// Seed with changed symbols
 	for (const anchor of anchors) {
 		if (anchor.resolvedNode) {
 			changed.set(anchor.symbolId, anchor);
 			neighborhood.set(anchor.symbolId, anchor.resolvedNode);
+
+			// If the changed symbol IS an entrypoint, it's its own nearest entrypoint
+			if (anchor.resolvedNode.entrypointKind) {
+				nearestEntrypoints.set(anchor.symbolId, anchor.symbolId);
+			}
 		}
 	}
 
 	if (changed.size === 0) {
-		return { changed, neighborhood, edges: [], affectedEntrypoints: [], affectedSideEffects: [] };
+		return { changed, neighborhood, edges: [], nearestEntrypoints, affectedSideEffects: [] };
 	}
 
-	// BFS upstream: find entrypoints that can reach changed code
-	const upstreamVisited = new Set<SymbolId>();
-	let frontier = new Set(changed.keys());
+	// UPSTREAM: For each changed symbol without an entrypoint, BFS to find the nearest one.
+	// Stop each path at the first entrypoint found — don't fan out to all callers.
+	for (const [changedId] of changed) {
+		if (nearestEntrypoints.has(changedId)) continue; // already has one
 
-	for (let hop = 0; hop < maxHops && frontier.size > 0; hop++) {
-		const nextFrontier = new Set<SymbolId>();
-		for (const nodeId of frontier) {
-			if (upstreamVisited.has(nodeId)) continue;
-			upstreamVisited.add(nodeId);
+		const visited = new Set<SymbolId>();
+		let frontier = new Set([changedId]);
+		let found = false;
 
-			const node = fullGraph.nodes.get(nodeId);
-			if (node) {
-				neighborhood.set(nodeId, node);
-				if (node.entrypointKind && !affectedEntrypoints.includes(nodeId)) {
-					affectedEntrypoints.push(nodeId);
+		for (let hop = 0; hop < maxHops && frontier.size > 0 && !found; hop++) {
+			const nextFrontier = new Set<SymbolId>();
+			for (const nodeId of frontier) {
+				if (visited.has(nodeId)) continue;
+				visited.add(nodeId);
+
+				const node = fullGraph.nodes.get(nodeId);
+				if (node) {
+					neighborhood.set(nodeId, node);
+					// Found an entrypoint — record it and stop this search
+					if (node.entrypointKind && nodeId !== changedId) {
+						nearestEntrypoints.set(changedId, nodeId);
+						found = true;
+						break;
+					}
+				}
+
+				// Follow inbound edges (callers)
+				const inEdges = fullGraph.inbound.get(nodeId) ?? [];
+				for (const edge of inEdges) {
+					if (!visited.has(edge.from)) {
+						nextFrontier.add(edge.from);
+						impactEdges.push(edge);
+					}
 				}
 			}
-
-			// Follow inbound edges (callers)
-			const inEdges = fullGraph.inbound.get(nodeId) ?? [];
-			for (const edge of inEdges) {
-				if (!upstreamVisited.has(edge.from)) {
-					nextFrontier.add(edge.from);
-					impactEdges.push(edge);
-				}
-			}
+			frontier = nextFrontier;
 		}
-		frontier = nextFrontier;
 	}
 
-	// BFS downstream: find side effects reachable from changed code
+	// DOWNSTREAM: Find side effects reachable from changed code
 	const downstreamVisited = new Set<SymbolId>();
-	frontier = new Set(changed.keys());
+	let frontier = new Set(changed.keys());
 	const sideEffectSet = new Set<SymbolId>();
 
 	for (let hop = 0; hop < maxHops && frontier.size > 0; hop++) {
@@ -290,14 +304,6 @@ export function extractImpactGraph(
 		frontier = nextFrontier;
 	}
 
-	// Also include entrypoints of changed nodes themselves
-	for (const [id, anchor] of changed) {
-		const node = anchor.resolvedNode;
-		if (node?.entrypointKind && !affectedEntrypoints.includes(id)) {
-			affectedEntrypoints.push(id);
-		}
-	}
-
 	// Deduplicate edges
 	const edgeSet = new Set<string>();
 	const uniqueEdges = impactEdges.filter((e) => {
@@ -311,7 +317,7 @@ export function extractImpactGraph(
 		changed,
 		neighborhood,
 		edges: uniqueEdges,
-		affectedEntrypoints,
+		nearestEntrypoints,
 		affectedSideEffects,
 	};
 }
