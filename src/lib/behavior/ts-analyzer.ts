@@ -432,8 +432,19 @@ function isExported(node: Node): boolean {
 
 // ── Call Graph via Type Checker ──
 
-const MAX_DEPTH = 8;
-const MAX_STEPS = 25;
+/** Max depth when tracing call chains (includes unchanged intermediate steps). */
+const MAX_TRACE_DEPTH = 12;
+/** Max steps to keep after filtering for display. */
+const MAX_DISPLAY_STEPS = 20;
+/** Max raw steps during tracing (before filtering). */
+const MAX_RAW_STEPS = 60;
+
+interface RawStep {
+	sym: AnalyzedSymbol;
+	sideEffects: SideEffect[];
+	calleeKeys: string[];
+	depth: number;
+}
 
 function buildBehaviorsFromEntrypoints(
 	entrypoints: AnalyzedEntrypoint[],
@@ -444,7 +455,8 @@ function buildBehaviorsFromEntrypoints(
 ): ChangedBehavior[] {
 	const behaviors: ChangedBehavior[] = [];
 
-	// Index symbols by qualified name for lookup
+	// Index symbols by qualified name for lookup.
+	// This map GROWS during tracing as we discover symbols in unchanged files.
 	const symbolMap = new Map<string, AnalyzedSymbol>();
 	for (const sym of allSymbols) {
 		symbolMap.set(sym.qualifiedName, sym);
@@ -453,12 +465,41 @@ function buildBehaviorsFromEntrypoints(
 	for (const ep of entrypoints) {
 		try {
 			const behaviorId = randomUUID();
-			const steps: ExecutionStep[] = [];
 			const visited = new Set<string>();
 
-			traceCallChain(ep.symbol, steps, visited, 0, behaviorId, symbolMap, changedRangesMap, cwd);
+			// Pass 1: Trace the full call chain, including through unchanged code
+			const rawSteps: RawStep[] = [];
+			traceCallChainFull(ep.symbol, rawSteps, visited, 0, symbolMap, changedRangesMap, cwd);
 
-			if (steps.length === 0) continue;
+			if (rawSteps.length === 0) continue;
+
+			// Pass 2: Filter to steps the reviewer should see
+			const filteredSteps = filterRelevantSteps(rawSteps);
+			if (filteredSteps.length === 0) continue;
+
+			// Build ExecutionStep objects from the filtered raw steps
+			const steps: ExecutionStep[] = filteredSteps.map((raw, i) => ({
+				id: `${behaviorId}-step-${i}`,
+				order: i,
+				symbol: toChangedSymbol(raw.sym),
+				snippet: {
+					filePath: raw.sym.filePath,
+					startLine: Math.max(1, raw.sym.line - 2),
+					endLine: raw.sym.endLine + 2,
+					language: detectLang(raw.sym.filePath),
+				},
+				sideEffects: raw.sideEffects,
+				callsTo: raw.calleeKeys,
+				rationale: raw.depth === 0
+					? "Entry point"
+					: raw.sym.isChanged
+						? "Modified by this diff"
+						: raw.sideEffects.length > 0
+							? "Has side effects"
+							: "Called on the path to modified code",
+				isChanged: raw.sym.isChanged,
+				confidence: raw.sym.confidence,
+			}));
 
 			// Aggregate
 			const sideEffectKeys = new Set<string>();
@@ -503,17 +544,21 @@ function buildBehaviorsFromEntrypoints(
 	return behaviors;
 }
 
-function traceCallChain(
+/**
+ * Pass 1: Trace the full call chain from an entrypoint, following calls
+ * through UNCHANGED code. When the type checker resolves a call to a function
+ * not in our symbolMap, we create an AnalyzedSymbol on-the-fly and continue.
+ */
+function traceCallChainFull(
 	sym: AnalyzedSymbol,
-	steps: ExecutionStep[],
+	steps: RawStep[],
 	visited: Set<string>,
 	depth: number,
-	behaviorId: string,
 	symbolMap: Map<string, AnalyzedSymbol>,
 	changedRangesMap: Map<string, ChangedRange[]>,
 	cwd: string,
 ): void {
-	if (depth > MAX_DEPTH || steps.length >= MAX_STEPS) return;
+	if (depth > MAX_TRACE_DEPTH || steps.length >= MAX_RAW_STEPS) return;
 	if (visited.has(sym.qualifiedName)) return;
 	visited.add(sym.qualifiedName);
 
@@ -533,86 +578,149 @@ function traceCallChain(
 		}
 	}
 
-	// Build snippet (content omitted for persistence; filled by API detail endpoint)
-	const snippet: CodeSnippet = {
-		filePath: sym.filePath,
-		startLine: Math.max(1, sym.line - 2),
-		endLine: sym.endLine + 2,
-		language: detectLang(sym.filePath),
-	};
-
-	// Find outgoing calls using the type checker
+	// Resolve outgoing calls — this may add NEW symbols to symbolMap on-the-fly
 	const calleeKeys = resolveOutgoingCalls(sym.node, symbolMap, cwd);
 
-	const step: ExecutionStep = {
-		id: `${behaviorId}-step-${steps.length}`,
-		order: steps.length,
-		symbol: toChangedSymbol(sym),
-		snippet,
-		sideEffects,
-		callsTo: calleeKeys,
-		rationale: depth === 0 ? "Entry point" : sym.isChanged ? "Modified by this diff" : "Called on the path to modified code",
-		isChanged: sym.isChanged,
-		confidence: sym.confidence,
-	};
+	steps.push({ sym, sideEffects, calleeKeys, depth });
 
-	steps.push(step);
-
-	// Recurse into callees that are known symbols
+	// Recurse into ALL resolved callees (changed or unchanged)
 	for (const key of calleeKeys) {
 		const calleeSym = symbolMap.get(key);
 		if (calleeSym) {
-			traceCallChain(calleeSym, steps, visited, depth + 1, behaviorId, symbolMap, changedRangesMap, cwd);
+			traceCallChainFull(calleeSym, steps, visited, depth + 1, symbolMap, changedRangesMap, cwd);
 		}
 	}
 }
 
 /**
- * Use the TypeScript type checker to resolve outgoing calls from a function/method node.
- * Returns qualified names of called symbols that are in our symbol map.
+ * Pass 2: Filter raw steps to keep only what the reviewer should see.
+ *
+ * Keep:
+ * - The entrypoint (depth 0) — always
+ * - Steps with isChanged — always (the diff touched this code)
+ * - Steps with side effects — always (DB writes, HTTP calls, etc.)
+ * - Steps that are direct parent/child of a kept step — bridge context
+ *
+ * Drop everything else (unchanged boilerplate in the middle of the chain).
+ */
+function filterRelevantSteps(rawSteps: RawStep[]): RawStep[] {
+	if (rawSteps.length <= MAX_DISPLAY_STEPS) {
+		// Small enough to show everything
+		return rawSteps;
+	}
+
+	// Mark which steps to keep
+	const keepIndices = new Set<number>();
+
+	// Always keep entrypoint
+	keepIndices.add(0);
+
+	// Keep changed steps and steps with side effects
+	for (let i = 0; i < rawSteps.length; i++) {
+		if (rawSteps[i].sym.isChanged || rawSteps[i].sideEffects.length > 0) {
+			keepIndices.add(i);
+		}
+	}
+
+	// Keep bridge steps: direct callers/callees of kept steps
+	// Build a caller→callee index from the raw steps
+	const qualifiedToIndex = new Map<string, number>();
+	for (let i = 0; i < rawSteps.length; i++) {
+		qualifiedToIndex.set(rawSteps[i].sym.qualifiedName, i);
+	}
+
+	const bridgePass = new Set(keepIndices);
+	for (const idx of keepIndices) {
+		const step = rawSteps[idx];
+		// Keep callees of this step
+		for (const calleeKey of step.calleeKeys) {
+			const calleeIdx = qualifiedToIndex.get(calleeKey);
+			if (calleeIdx !== undefined) bridgePass.add(calleeIdx);
+		}
+		// Keep the step that calls this one (parent)
+		if (idx > 0) {
+			for (let j = idx - 1; j >= 0; j--) {
+				if (rawSteps[j].calleeKeys.includes(step.sym.qualifiedName)) {
+					bridgePass.add(j);
+					break;
+				}
+			}
+		}
+	}
+
+	// Collect and sort by original order, cap at MAX_DISPLAY_STEPS
+	const filtered = Array.from(bridgePass)
+		.sort((a, b) => a - b)
+		.slice(0, MAX_DISPLAY_STEPS)
+		.map((i) => rawSteps[i]);
+
+	return filtered;
+}
+
+/**
+ * Resolve outgoing calls from a function/method node using the TypeScript type checker.
+ *
+ * CRITICAL: When the type checker resolves a call to a function NOT in symbolMap,
+ * we create an AnalyzedSymbol on-the-fly and ADD it to symbolMap. This allows
+ * traceCallChainFull to follow the chain through unchanged code.
  */
 function resolveOutgoingCalls(node: Node, symbolMap: Map<string, AnalyzedSymbol>, cwd: string): string[] {
 	const calleeKeys: string[] = [];
 	const seen = new Set<string>();
 
 	try {
-		// Find all call expressions inside this node
 		const callExpressions = node.getDescendantsOfKind(SyntaxKind.CallExpression);
 
 		for (const call of callExpressions) {
 			try {
 				const expr = call.getExpression();
-				let resolvedName: string | null = null;
 
 				// Try to resolve via the type checker
-				const symbol = expr.getSymbol();
-				if (symbol) {
-					// Get the declaration to find the real name and file
-					const declarations = symbol.getDeclarations();
-					if (declarations.length > 0) {
-						const decl = declarations[0];
-						const declFile = decl.getSourceFile().getFilePath();
-						const relPath = makeRelative(declFile, cwd);
-						const declName = symbol.getName();
+				const tsSym = expr.getSymbol();
+				if (!tsSym) continue;
 
-						// Check if this matches a symbol we're tracking
-						// Try both qualified and simple names
-						const parentClass = getParentClassName(decl);
-						const qualified = parentClass ? `${parentClass}.${declName}` : declName;
+				const declarations = tsSym.getDeclarations();
+				if (declarations.length === 0) continue;
 
-						if (symbolMap.has(qualified)) {
-							resolvedName = qualified;
-						} else if (symbolMap.has(declName)) {
-							resolvedName = declName;
-						}
-					}
+				const decl = declarations[0];
+				const declFile = decl.getSourceFile().getFilePath();
+
+				// Skip calls into node_modules
+				if (declFile.includes("/node_modules/")) continue;
+
+				const relPath = makeRelative(declFile, cwd);
+				// Skip if the file is outside the project (absolute path didn't resolve)
+				if (relPath.startsWith("/")) continue;
+
+				const declName = tsSym.getName();
+				const parentClass = getParentClassName(decl);
+				const qualified = parentClass ? `${parentClass}.${declName}` : declName;
+
+				// Check if already in symbolMap
+				let resolvedName: string | null = null;
+				if (symbolMap.has(qualified)) {
+					resolvedName = qualified;
+				} else if (symbolMap.has(declName)) {
+					resolvedName = declName;
 				}
 
-				// Fallback: try identifier name matching
+				// NOT in symbolMap — create on-the-fly if it's a function/method
 				if (!resolvedName) {
-					const name = getCallName(expr);
-					if (name && symbolMap.has(name)) {
-						resolvedName = name;
+					const funcNode = findFunctionNode(decl);
+					if (funcNode) {
+						const newSym: AnalyzedSymbol = {
+							name: declName,
+							qualifiedName: qualified,
+							kind: parentClass ? "method" : "function",
+							filePath: relPath,
+							line: funcNode.getStartLineNumber(),
+							endLine: funcNode.getEndLineNumber(),
+							isChanged: false, // it's in an unchanged file
+							confidence: "high", // type checker resolved it
+							node: funcNode,
+						};
+						symbolMap.set(qualified, newSym);
+						resolvedName = qualified;
 					}
 				}
 
@@ -629,6 +737,34 @@ function resolveOutgoingCalls(node: Node, symbolMap: Map<string, AnalyzedSymbol>
 	}
 
 	return calleeKeys;
+}
+
+/**
+ * Given a declaration node (which might be a VariableDeclaration, Parameter,
+ * FunctionDeclaration, MethodDeclaration, etc.), find the actual function body node
+ * we can trace into. Returns null if the declaration isn't a function-like thing.
+ */
+function findFunctionNode(decl: Node): Node | null {
+	// Direct function/method declarations
+	if (Node.isFunctionDeclaration(decl) || Node.isMethodDeclaration(decl)) {
+		return decl;
+	}
+	// Variable declaration: const foo = () => {} or const foo = function() {}
+	if (Node.isVariableDeclaration(decl)) {
+		const init = decl.getInitializer();
+		if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
+			return init;
+		}
+	}
+	// Parameter (e.g., callback) — skip, we can't meaningfully trace into parameters
+	// PropertyAssignment, ShorthandPropertyAssignment — try to find the value
+	if (Node.isPropertyAssignment(decl)) {
+		const init = decl.getInitializer();
+		if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
+			return init;
+		}
+	}
+	return null;
 }
 
 function getCallName(expr: Node): string | null {
