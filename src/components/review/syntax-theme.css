@@ -89,3 +89,11 @@
  * The backgrounds are subtle enough (15% opacity) that vivid
  * syntax doesn't clash. No desaturation needed.
  */
+
+/* -- Selected line range highlight (for multi-line comment selection) -- */
+.diff-viewer-container .diff-gutter-selected {
+	background-color: rgba(139, 92, 246, 0.18) !important;
+}
+.diff-viewer-container .diff-code-selected {
+	background-color: rgba(139, 92, 246, 0.10) !important;
+}

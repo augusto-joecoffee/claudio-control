@@ -21,8 +21,8 @@ interface DiffViewerProps {
 	rawDiff: string;
 	viewType: ViewType;
 	comments: ReviewComment[];
-	activeCommentLocation: { filePath: string; line: number } | null;
-	onGutterClick: (filePath: string, line: number, anchorSnippet: string) => void;
+	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
+	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
@@ -105,6 +105,20 @@ function getAnchorSnippet(hunk: HunkData, changeIndex: number): string {
 		.join("\n");
 }
 
+/** Extract all lines in a range (with 1 line of context) for multi-line comment anchoring. */
+function getRangeAnchorSnippet(hunks: HunkData[], startLine: number, endLine: number): string {
+	const lines: string[] = [];
+	for (const hunk of hunks) {
+		for (const change of hunk.changes) {
+			const newLine = change.type === "normal" ? change.newLineNumber : change.type === "insert" ? change.lineNumber : null;
+			if (newLine !== null && newLine >= startLine - 1 && newLine <= endLine + 1) {
+				lines.push(change.content);
+			}
+		}
+	}
+	return lines.join("\n");
+}
+
 function findChangeIndexByNewLine(hunks: HunkData[], line: number): { hunk: HunkData; index: number } | null {
 	for (const hunk of hunks) {
 		for (let i = 0; i < hunk.changes.length; i++) {
@@ -155,8 +169,8 @@ const FileDiff = memo(function FileDiff({
 	file: FileData;
 	viewType: ViewType;
 	comments: ReviewComment[];
-	activeCommentLocation: { filePath: string; line: number } | null;
-	onGutterClick: (filePath: string, line: number, anchorSnippet: string) => void;
+	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
+	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
@@ -240,20 +254,21 @@ const FileDiff = memo(function FileDiff({
 	const widgets = useMemo(() => {
 		const w: Record<string, React.ReactNode> = {};
 
-		// Group comments by line
-		const commentsByLine = new Map<number, ReviewComment[]>();
+		// Group comments by their widget line (endLine for ranges, line for single-line)
+		const commentsByWidgetLine = new Map<number, ReviewComment[]>();
 		for (const c of fileComments) {
-			const existing = commentsByLine.get(c.line) ?? [];
+			const widgetLine = c.endLine ?? c.line;
+			const existing = commentsByWidgetLine.get(widgetLine) ?? [];
 			existing.push(c);
-			commentsByLine.set(c.line, existing);
+			commentsByWidgetLine.set(widgetLine, existing);
 		}
 
-		// For each line with comments, find the corresponding change and add a widget
-		for (const [line, lineComments] of commentsByLine) {
-			const result = findChangeIndexByNewLine(file.hunks, line);
+		// For each widget line, find the corresponding change and add a widget
+		for (const [widgetLine, lineComments] of commentsByWidgetLine) {
+			const result = findChangeIndexByNewLine(expandedHunks, widgetLine);
 			if (result) {
 				const key = getChangeKey(result.hunk.changes[result.index]);
-				const isAdding = activeCommentLocation?.filePath === filePath && activeCommentLocation?.line === line;
+				const isAdding = activeCommentLocation?.filePath === filePath && activeCommentLocation?.endLine === widgetLine;
 				w[key] = (
 					<CommentThread
 						comments={lineComments}
@@ -269,9 +284,10 @@ const FileDiff = memo(function FileDiff({
 
 		// Handle the case where we're adding a new comment on a line that has no comments yet
 		if (activeCommentLocation?.filePath === filePath) {
-			const hasExistingWidget = fileComments.some((c) => c.line === activeCommentLocation.line);
+			const widgetLine = activeCommentLocation.endLine;
+			const hasExistingWidget = fileComments.some((c) => (c.endLine ?? c.line) === widgetLine);
 			if (!hasExistingWidget) {
-				const result = findChangeIndexByNewLine(file.hunks, activeCommentLocation.line);
+				const result = findChangeIndexByNewLine(expandedHunks, widgetLine);
 				if (result) {
 					const key = getChangeKey(result.hunk.changes[result.index]);
 					w[key] = (
@@ -287,37 +303,63 @@ const FileDiff = memo(function FileDiff({
 		}
 
 		return w;
-	}, [fileComments, activeCommentLocation, filePath, file.hunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment]);
+	}, [fileComments, activeCommentLocation, filePath, expandedHunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment]);
 
-	const handleGutterClick = useCallback(
-		({ change }: { change: ChangeData | null }) => {
-			if (!change) return;
-			const newLine =
-				change.type === "normal" ? change.newLineNumber : change.type === "insert" ? change.lineNumber : null;
-			if (newLine === null) return;
-
-			const result = findChangeIndexByNewLine(file.hunks, newLine);
-			const snippet = result ? getAnchorSnippet(result.hunk, result.index) : "";
-			onGutterClick(filePath, newLine, snippet);
+	const handleLineClick = useCallback(
+		(newLine: number, shiftKey: boolean) => {
+			if (shiftKey && activeCommentLocation?.filePath === filePath) {
+				// Extend selection from existing start
+				const start = Math.min(activeCommentLocation.startLine, newLine);
+				const end = Math.max(activeCommentLocation.startLine, newLine);
+				const snippet = getRangeAnchorSnippet(expandedHunks, start, end);
+				onGutterClick(filePath, start, end, snippet);
+			} else {
+				// New single-line selection
+				const result = findChangeIndexByNewLine(expandedHunks, newLine);
+				const snippet = result ? getAnchorSnippet(result.hunk, result.index) : "";
+				onGutterClick(filePath, newLine, newLine, snippet);
+			}
 		},
-		[file.hunks, filePath, onGutterClick],
+		[expandedHunks, filePath, onGutterClick, activeCommentLocation],
 	);
+
+	// Compute change keys for the selected line range highlight
+	const selectedChanges = useMemo(() => {
+		if (!activeCommentLocation || activeCommentLocation.filePath !== filePath) return [];
+		const keys: string[] = [];
+		for (const hunk of expandedHunks) {
+			for (const change of hunk.changes) {
+				const newLine = change.type === "normal" ? change.newLineNumber : change.type === "insert" ? change.lineNumber : null;
+				if (newLine !== null && newLine >= activeCommentLocation.startLine && newLine <= activeCommentLocation.endLine) {
+					keys.push(getChangeKey(change));
+				}
+			}
+		}
+		return keys;
+	}, [activeCommentLocation, filePath, expandedHunks]);
 
 	const renderGutter = useCallback(
 		({ change, side, renderDefault }: GutterOptions) => {
 			if (side === "new" || (viewType === "unified" && change.type !== "delete")) {
+				const newLine =
+					change.type === "normal" ? change.newLineNumber : change.type === "insert" ? change.lineNumber : null;
 				return (
-					<span className="cursor-pointer hover:bg-violet-500/20 rounded px-0.5" title="Add comment">
+					<span
+						className="cursor-pointer hover:bg-violet-500/20 rounded px-0.5"
+						title="Click to comment · Shift+click to select range"
+						onClick={(e) => {
+							e.stopPropagation();
+							if (newLine !== null) handleLineClick(newLine, e.shiftKey);
+						}}
+					>
 						{renderDefault()}
 					</span>
 				);
 			}
 			return renderDefault();
 		},
-		[viewType],
+		[viewType, handleLineClick],
 	);
-
-	const gutterEvents = useMemo(() => ({ onClick: handleGutterClick }), [handleGutterClick]);
 
 	return (
 		<div ref={fileRef} id={`file-${filePath}`} className="mb-4 mx-4 first:mt-3">
@@ -368,8 +410,8 @@ const FileDiff = memo(function FileDiff({
 						hunks={expandedHunks}
 						widgets={widgets}
 						tokens={tokens}
+						selectedChanges={selectedChanges}
 						renderGutter={renderGutter}
-						gutterEvents={gutterEvents}
 					>
 						{(hunks: HunkData[]) =>
 							hunks.flatMap((hunk, idx) => {
@@ -448,8 +490,8 @@ function LazyFileDiff(props: {
 	file: FileData;
 	viewType: ViewType;
 	comments: ReviewComment[];
-	activeCommentLocation: { filePath: string; line: number } | null;
-	onGutterClick: (filePath: string, line: number, anchorSnippet: string) => void;
+	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
+	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;

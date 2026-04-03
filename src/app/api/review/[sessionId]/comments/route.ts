@@ -24,11 +24,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
 	}
 
 	const body = await request.json();
-	const { filePath, line, content, anchorSnippet } = body as {
+	const { filePath, line, content, anchorSnippet, endLine } = body as {
 		filePath: string;
 		line: number;
 		content: string;
 		anchorSnippet: string;
+		endLine?: number;
 	};
 
 	if (!filePath || !line || !content) {
@@ -39,6 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
 		id: crypto.randomUUID(),
 		filePath,
 		line,
+		endLine: endLine ?? undefined,
 		originalLine: line,
 		anchorSnippet: anchorSnippet || "",
 		content,
