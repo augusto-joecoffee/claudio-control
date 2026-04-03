@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { loadReview, saveReview } from "@/lib/review-store";
-import { getFullDiff, getDiffFingerprint } from "@/lib/review-diff";
+import { loadReview } from "@/lib/review-store";
+import { getDiffFingerprint } from "@/lib/review-diff";
 import { loadBehaviorAnalysis, saveBehaviorAnalysis } from "@/lib/behavior-store";
 import { discoverSessions } from "@/lib/discovery";
 import { formatBehaviorPrompt } from "@/lib/behavior/prompt";
-import type { ReviewSession } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 /**
- * POST: Trigger behavior analysis by sending a prompt to the Claude session.
- * Reuses the same send-message mechanism as the review comment queue.
+ * POST: Trigger behavior analysis by sending a SHORT prompt to the Claude session.
+ * The prompt tells Claude to run git diff itself and return structured JSON.
+ * We do NOT embed the diff in the prompt (too large for tmux send-keys).
  */
 export async function POST(_request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
 	const { sessionId } = await params;
@@ -41,14 +41,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 		return NextResponse.json({ error: "Claude session not found" }, { status: 404 });
 	}
 
-	// Get the raw diff
-	const rawDiff = await getFullDiff(cwd, review.mergeBase);
-	if (!rawDiff) {
-		return NextResponse.json({ error: "No diff found" }, { status: 400 });
-	}
-
-	// Format the behavior analysis prompt
-	const { analysisId, prompt } = formatBehaviorPrompt(rawDiff);
+	// Format the behavior analysis prompt (short — tells Claude to read the diff itself)
+	const { analysisId, prompt } = formatBehaviorPrompt(review.mergeBase);
 
 	// Send the prompt to the Claude session via the actions API
 	try {
@@ -64,8 +58,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ se
 		});
 
 		if (!res.ok) {
+			const errorBody = await res.text().catch(() => "");
 			return NextResponse.json(
-				{ error: `Failed to send prompt to session: ${res.status}` },
+				{ error: `Failed to send prompt to session: ${res.status} ${errorBody}` },
 				{ status: 500 },
 			);
 		}
