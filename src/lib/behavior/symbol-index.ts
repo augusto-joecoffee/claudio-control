@@ -12,7 +12,7 @@
 import { Project, SyntaxKind, Node, ts } from "ts-morph";
 import type { SourceFile } from "ts-morph";
 import { join, resolve } from "path";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import type { EntrypointKind, ConfidenceLevel } from "../types";
 import type { SymbolNode, SymbolId, SemanticCodeGraph } from "./graph-types";
 import { makeSymbolId, createEmptyGraph } from "./graph-types";
@@ -65,7 +65,7 @@ export function getProjectAndGraph(
 	}
 
 	// Cache miss — build from scratch
-	const project = loadProject(cwd);
+	const project = loadProject(cwd, changedFilePaths);
 	const graph = buildFullGraph(project, cwd);
 
 	cache = { cwd, project, graph, createdAt: now };
@@ -79,8 +79,8 @@ export function invalidateGraphCache(): void {
 
 // ── Project Loading ──
 
-function loadProject(cwd: string): Project {
-	const tsConfigPath = findTsConfig(cwd);
+function loadProject(cwd: string, changedFilePaths?: string[]): Project {
+	const tsConfigPath = findTsConfig(cwd, changedFilePaths);
 
 	if (tsConfigPath) {
 		return new Project({
@@ -106,11 +106,76 @@ function loadProject(cwd: string): Project {
 	return project;
 }
 
-function findTsConfig(cwd: string): string | undefined {
-	for (const name of ["tsconfig.json", "tsconfig.build.json"]) {
-		const p = join(cwd, name);
-		if (existsSync(p)) return p;
+/**
+ * Find the best tsconfig for the project. Handles monorepos where the root
+ * tsconfig may have `"files": []` and the actual sources are in a sub-package.
+ *
+ * Strategy:
+ * 1. Check root tsconfig — if it includes files (no empty `files` array), use it
+ * 2. If root is empty, look for tsconfig in common monorepo app directories
+ * 3. Use changed file paths to determine which sub-package to target
+ */
+function findTsConfig(cwd: string, changedFilePaths?: string[]): string | undefined {
+	// Try root tsconfig first
+	const rootConfig = join(cwd, "tsconfig.json");
+	if (existsSync(rootConfig)) {
+		try {
+			const content = JSON.parse(readFileSync(rootConfig, "utf-8"));
+			// If root config has `files: []` or no include/files, it's a monorepo wrapper
+			const hasFiles = content.files && content.files.length > 0;
+			const hasInclude = content.include && content.include.length > 0;
+			const hasReferences = content.references && content.references.length > 0;
+			if (hasFiles || hasInclude) {
+				return rootConfig; // Root config actually includes source files
+			}
+			// Root is a wrapper — find the sub-package tsconfig
+		} catch { /* fall through */ }
 	}
+
+	// Determine sub-package from changed file paths
+	if (changedFilePaths && changedFilePaths.length > 0) {
+		// Extract common prefix directory (e.g., "apps/platform/src/..." → "apps/platform")
+		const subDirs = new Set<string>();
+		for (const p of changedFilePaths) {
+			const parts = p.split("/");
+			// Look for patterns like "apps/X", "packages/X", "services/X"
+			if (parts.length >= 2) {
+				if (["apps", "packages", "services", "libs"].includes(parts[0])) {
+					subDirs.add(parts.slice(0, 2).join("/"));
+				}
+			}
+		}
+
+		for (const subDir of subDirs) {
+			for (const name of ["tsconfig.json", "tsconfig.build.json"]) {
+				const p = join(cwd, subDir, name);
+				if (existsSync(p)) return p;
+			}
+		}
+	}
+
+	// Fallback: search common monorepo structures
+	for (const pattern of ["apps/*/tsconfig.json", "packages/*/tsconfig.json"]) {
+		const dir = pattern.split("/").slice(0, -1).join("/");
+		const base = join(cwd, dir);
+		if (existsSync(base)) {
+			try {
+				const entries = readdirSync(base);
+				for (const entry of entries) {
+					const tsconfig = join(base, entry, "tsconfig.json");
+					if (existsSync(tsconfig)) return tsconfig;
+				}
+			} catch { /* continue */ }
+		}
+	}
+
+	// Last resort: root tsconfig even if it's a wrapper
+	if (existsSync(rootConfig)) return rootConfig;
+
+	// Try tsconfig.build.json
+	const buildConfig = join(cwd, "tsconfig.build.json");
+	if (existsSync(buildConfig)) return buildConfig;
+
 	return undefined;
 }
 
