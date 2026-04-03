@@ -134,18 +134,22 @@ function findChangeIndexByNewLine(hunks: HunkData[], line: number): { hunk: Hunk
 	return null;
 }
 
-/** Build "normal" change entries from raw file lines for expanding context. */
-function buildNormalChanges(lines: string[], startLine: number, count: number): ChangeData[] {
+/** Build "normal" change entries from raw file lines for expanding context.
+ *  `newStart` is the 1-based line in the new file (used for content + newLineNumber).
+ *  `oldStart` is the 1-based line on the old side (may differ due to insertions/deletions). */
+function buildNormalChanges(lines: string[], newStart: number, count: number, oldStart?: number): ChangeData[] {
 	const changes: ChangeData[] = [];
+	const oldBase = oldStart ?? newStart;
 	for (let i = 0; i < count; i++) {
-		const lineNum = startLine + i;
-		if (lineNum < 1 || lineNum > lines.length) continue;
+		const newLine = newStart + i;
+		const oldLine = oldBase + i;
+		if (newLine < 1 || newLine > lines.length) continue;
 		changes.push({
 			type: "normal",
 			isNormal: true,
-			oldLineNumber: lineNum,
-			newLineNumber: lineNum,
-			content: lines[lineNum - 1] ?? "",
+			oldLineNumber: oldLine,
+			newLineNumber: newLine,
+			content: lines[newLine - 1] ?? "",
 		} as ChangeData);
 	}
 	return changes;
@@ -213,19 +217,31 @@ const FileDiff = memo(function FileDiff({
 			const hunks = prev.map((h) => ({ ...h, changes: [...h.changes] }));
 			const hunk = hunks[hunkIndex];
 			const firstChange = hunk.changes[0];
-			const firstLine = firstChange?.type === "normal" ? firstChange.oldLineNumber
+			// Get both old and new line numbers for the first change in this hunk
+			const firstOld = firstChange?.type === "normal" ? firstChange.oldLineNumber
 				: firstChange?.type === "delete" ? firstChange.lineNumber : 1;
+			const firstNew = firstChange?.type === "normal" ? firstChange.newLineNumber
+				: firstChange?.type === "insert" ? firstChange.lineNumber : 1;
+
 			const prevHunk = hunkIndex > 0 ? hunks[hunkIndex - 1] : null;
 			const prevLastChange = prevHunk?.changes[prevHunk.changes.length - 1];
-			const prevLastLine = prevLastChange?.type === "normal" ? prevLastChange.oldLineNumber
+			const prevLastOld = prevLastChange?.type === "normal" ? prevLastChange.oldLineNumber
 				: prevLastChange?.type === "insert" ? prevLastChange.lineNumber : 0;
-			const gapStart = prevLastLine + 1;
-			const gapEnd = firstLine - 1;
-			const expandFrom = Math.max(gapStart, gapEnd - EXPAND_STEP + 1);
-			const newChanges = buildNormalChanges(lines, expandFrom, gapEnd - expandFrom + 1);
+			const prevLastNew = prevLastChange?.type === "normal" ? prevLastChange.newLineNumber
+				: prevLastChange?.type === "insert" ? prevLastChange.lineNumber : 0;
+
+			const gapOldStart = prevLastOld + 1;
+			const gapNewStart = prevLastNew + 1;
+			const gapOldEnd = firstOld - 1;
+			const gapNewEnd = firstNew - 1;
+			const count = gapNewEnd - gapNewStart + 1;
+			const expandCount = Math.min(count, EXPAND_STEP);
+			// Expand from the bottom of the gap (closest to the hunk)
+			const skipCount = count - expandCount;
+			const newChanges = buildNormalChanges(lines, gapNewStart + skipCount, expandCount, gapOldStart + skipCount);
 			hunk.changes = [...newChanges, ...hunk.changes];
-			hunk.oldStart = expandFrom;
-			hunk.newStart = expandFrom;
+			hunk.oldStart = gapOldStart + skipCount;
+			hunk.newStart = gapNewStart + skipCount;
 			return hunks;
 		});
 	}, [fetchFileLines]);
@@ -237,16 +253,22 @@ const FileDiff = memo(function FileDiff({
 			const hunks = prev.map((h) => ({ ...h, changes: [...h.changes] }));
 			const hunk = hunks[hunkIndex];
 			const lastChange = hunk.changes[hunk.changes.length - 1];
-			const lastLine = lastChange?.type === "normal" ? lastChange.oldLineNumber
+			// Get both old and new line numbers for the last change in this hunk
+			const lastOld = lastChange?.type === "normal" ? lastChange.oldLineNumber
 				: lastChange?.type === "insert" ? lastChange.lineNumber : 0;
+			const lastNew = lastChange?.type === "normal" ? lastChange.newLineNumber
+				: lastChange?.type === "insert" ? lastChange.lineNumber : 0;
+
 			const nextHunk = hunkIndex < hunks.length - 1 ? hunks[hunkIndex + 1] : null;
 			const nextFirstChange = nextHunk?.changes[0];
-			const nextFirstLine = nextFirstChange?.type === "normal" ? nextFirstChange.oldLineNumber
+			const nextFirstNew = nextFirstChange?.type === "normal" ? nextFirstChange.newLineNumber
 				: nextFirstChange?.type === "delete" ? nextFirstChange.lineNumber : lines.length + 1;
-			const gapStart = lastLine + 1;
-			const gapEnd = Math.min(nextFirstLine - 1, lines.length);
-			const expandTo = Math.min(gapEnd, gapStart + EXPAND_STEP - 1);
-			const newChanges = buildNormalChanges(lines, gapStart, expandTo - gapStart + 1);
+
+			const gapOldStart = lastOld + 1;
+			const gapNewStart = lastNew + 1;
+			const gapNewEnd = Math.min(nextFirstNew - 1, lines.length);
+			const expandCount = Math.min(gapNewEnd - gapNewStart + 1, EXPAND_STEP);
+			const newChanges = buildNormalChanges(lines, gapNewStart, expandCount, gapOldStart);
 			hunk.changes = [...hunk.changes, ...newChanges];
 			return hunks;
 		});
