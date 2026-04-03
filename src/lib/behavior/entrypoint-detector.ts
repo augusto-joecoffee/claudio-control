@@ -1,6 +1,6 @@
 /**
  * Classify which changed symbols are entrypoints (API routes, event handlers,
- * test functions, etc.) using file-path patterns and code patterns.
+ * test functions, job performers, etc.) using file-path patterns and code patterns.
  */
 
 import type { ChangedSymbol, EntrypointKind, ConfidenceLevel } from "../types";
@@ -16,6 +16,13 @@ export interface DetectedEntrypoint {
 /**
  * Detect entrypoints among changed symbols.
  * Returns a subset of symbols classified as entrypoints with their kind.
+ *
+ * Strategy:
+ * 1. File-path patterns (highest priority) — e.g. route.ts, *.job.ts, *.test.ts
+ * 2. Code-body patterns — e.g. app.get(), router.post()
+ * 3. Top-level exported functions that appear to be "leaves" (not imported by other changed files)
+ *    — but ONLY for exported functions/consts, NOT for random methods.
+ *    — and only if the function body itself contains meaningful logic (not just a re-export object).
  */
 export function detectEntrypoints(
 	symbols: ChangedSymbol[],
@@ -25,11 +32,25 @@ export function detectEntrypoints(
 	const entrypoints: DetectedEntrypoint[] = [];
 	const seenQualified = new Set<string>();
 
+	// Pre-build a set of all symbol names and their files for import checking
+	const symbolNameToFiles = new Map<string, Set<string>>();
+	for (const sym of symbols) {
+		const files = symbolNameToFiles.get(sym.name) ?? new Set();
+		files.add(sym.location.filePath);
+		symbolNameToFiles.set(sym.name, files);
+	}
+
 	for (const symbol of symbols) {
 		// Only consider changed symbols as entrypoints
 		if (!symbol.location.isChanged) continue;
 
+		// Skip type-only symbols
+		if (symbol.kind === "type") continue;
+
 		const filePath = symbol.location.filePath;
+		const key = symbol.qualifiedName ?? symbol.name;
+		if (seenQualified.has(key)) continue;
+
 		let detected = false;
 
 		// 1. Check file-path-based patterns (highest priority)
@@ -37,10 +58,7 @@ export function detectEntrypoints(
 			if (!pattern.pathMatch.test(filePath)) continue;
 			if (pattern.symbolMatch && !pattern.symbolMatch.test(symbol.name)) continue;
 
-			const key = symbol.qualifiedName ?? symbol.name;
-			if (seenQualified.has(key)) break;
 			seenQualified.add(key);
-
 			entrypoints.push({
 				symbol,
 				kind: pattern.kind,
@@ -52,7 +70,9 @@ export function detectEntrypoints(
 
 		if (detected) continue;
 
-		// 2. Check code-pattern-based rules (look at the symbol's body)
+		// 2. Check code-pattern-based rules (ONLY on exported functions/top-level consts)
+		if (symbol.kind !== "function" && symbol.kind !== "export") continue;
+
 		const lines = fileLines.get(filePath);
 		if (!lines) continue;
 
@@ -63,10 +83,7 @@ export function detectEntrypoints(
 		for (const pattern of ENTRYPOINT_CODE_PATTERNS) {
 			if (!pattern.codeMatch.test(body)) continue;
 
-			const key = symbol.qualifiedName ?? symbol.name;
-			if (seenQualified.has(key)) break;
 			seenQualified.add(key);
-
 			entrypoints.push({
 				symbol,
 				kind: pattern.kind,
@@ -78,31 +95,55 @@ export function detectEntrypoints(
 
 		if (detected) continue;
 
-		// 3. Exported functions that aren't imported by other changed files → potential entrypoint
-		const content = fileContents.get(filePath) ?? "";
+		// 3. Top-level exported functions that are not imported by other changed files.
+		//    Only for explicitly exported functions (not methods, not types).
 		const line = lines[startLine] ?? "";
-		if (/^export\s+/.test(line) && symbol.kind !== "type") {
-			// Check if any other changed file imports this symbol
-			const isImported = Array.from(fileContents.entries()).some(([otherPath, otherContent]) => {
-				if (otherPath === filePath) return false;
-				// Simple check: does the other file import this symbol name from a path containing this file?
-				const baseName = filePath.replace(/\.\w+$/, "").split("/").pop();
-				return otherContent.includes(symbol.name) && baseName && otherContent.includes(baseName);
-			});
+		if (!/^export\s+/.test(line)) continue;
+		if (symbol.kind !== "function") continue;
 
-			if (!isImported) {
-				const key = symbol.qualifiedName ?? symbol.name;
-				if (!seenQualified.has(key)) {
-					seenQualified.add(key);
-					entrypoints.push({
-						symbol,
-						kind: "exported-function",
-						confidence: "low",
-					});
-				}
-			}
-		}
+		// Check if any other changed file imports this symbol name
+		const isImported = isSymbolImportedByOtherFiles(symbol.name, filePath, fileContents);
+		if (isImported) continue;
+
+		// Additional filter: the function must have a non-trivial body.
+		// Skip re-export objects like `export const foo = { prePerform, perform }`
+		// and simple one-liners.
+		const bodyLineCount = endLine - startLine;
+		if (bodyLineCount < 3) continue;
+
+		seenQualified.add(key);
+		entrypoints.push({
+			symbol,
+			kind: "exported-function",
+			confidence: "low",
+		});
 	}
 
 	return entrypoints;
+}
+
+function isSymbolImportedByOtherFiles(
+	symbolName: string,
+	sourceFilePath: string,
+	fileContents: Map<string, string>,
+): boolean {
+	const baseName = sourceFilePath.replace(/\.\w+$/, "").split("/").pop();
+	if (!baseName) return false;
+
+	for (const [otherPath, otherContent] of fileContents) {
+		if (otherPath === sourceFilePath) continue;
+
+		// Check for import statement that references both the symbol name and the source file
+		// This is a rough heuristic but avoids false positives from unrelated identifier matches
+		const importRegex = new RegExp(
+			`import\\s+(?:(?:\\{[^}]*\\b${escapeRegex(symbolName)}\\b[^}]*\\})|(?:${escapeRegex(symbolName)}))\\s+from\\s+['"][^'"]*${escapeRegex(baseName)}`,
+		);
+		if (importRegex.test(otherContent)) return true;
+	}
+
+	return false;
+}
+
+function escapeRegex(str: string): string {
+	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

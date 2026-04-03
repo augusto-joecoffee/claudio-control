@@ -175,6 +175,8 @@ function walkPath(
 function buildBehaviorName(ep: DetectedEntrypoint): string {
 	const sym = ep.symbol;
 	const fileName = sym.location.filePath.split("/").pop() ?? "";
+	// Extract a readable job/file name: "calculateDailyLoyaltyFees.job.ts" → "calculateDailyLoyaltyFees"
+	const jobName = fileName.replace(/\.(job|worker|cron)\.(ts|js)$/, "");
 
 	switch (ep.kind) {
 		case "api-route": {
@@ -188,17 +190,26 @@ function buildBehaviorName(ep: DetectedEntrypoint): string {
 			return `${sym.name} (${fileName})`;
 		}
 		case "test-function":
-			return `test: ${sym.name}`;
+			return `test: ${jobName}`;
 		case "react-component":
 			return `<${sym.name} />`;
 		case "event-handler":
 			return `on: ${sym.name}`;
-		case "queue-consumer":
+		case "queue-consumer": {
+			// For job files, use the file name not the method name (perform → calculateDailyLoyaltyFees)
+			if (/^(perform|prePerform|postPerform|execute|run|handle|process)$/.test(sym.name)) {
+				return `job: ${jobName}.${sym.name}`;
+			}
 			return `queue: ${sym.name}`;
+		}
 		case "cli-command":
 			return `cmd: ${sym.name}`;
-		case "cron-job":
+		case "cron-job": {
+			if (/^(perform|prePerform|postPerform|execute|run|handle)$/.test(sym.name)) {
+				return `cron: ${jobName}.${sym.name}`;
+			}
 			return `cron: ${sym.name}`;
+		}
 		default:
 			return sym.qualifiedName ?? sym.name;
 	}

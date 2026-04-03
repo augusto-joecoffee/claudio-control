@@ -6,7 +6,7 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
 import type { ChangedSymbol, FileLocation } from "../types";
-import { SYMBOL_DECLARATION_PATTERNS, ANALYZABLE_EXTENSIONS } from "./patterns";
+import { SYMBOL_DECLARATION_PATTERNS, SYMBOL_SKIP_LIST, ANALYZABLE_EXTENSIONS } from "./patterns";
 import { symbolConfidence } from "./confidence";
 
 export interface ChangedRange {
@@ -137,6 +137,19 @@ function findSymbolEnd(fileLines: string[], declarationLine: number): number {
 	return Math.min(declarationLine + 10, fileLines.length);
 }
 
+/** Check if a file looks like a migration or schema definition (not business logic). */
+function isSchemaMigrationFile(filePath: string): boolean {
+	const lower = filePath.toLowerCase();
+	return (
+		/\bmigration/.test(lower) ||
+		/\bschema\b/.test(lower) ||
+		/\bentit(y|ies)\b/.test(lower) ||
+		/\.entity\.(ts|js)$/.test(lower) ||
+		/\.schema\.(ts|js)$/.test(lower) ||
+		/\.migration\.(ts|js)$/.test(lower)
+	);
+}
+
 /**
  * Extract changed symbols from source files based on diff ranges.
  */
@@ -185,9 +198,12 @@ export async function extractChangedSymbols(
 		const lines = fileLines.get(diffFile.filePath);
 		if (!lines) continue;
 
-		// Track which class we're currently inside (for qualified names)
+		const isSchemaFile = isSchemaMigrationFile(diffFile.filePath);
+
+		// Track which class we're currently inside (for qualified names and method scope)
 		let currentClass: string | null = null;
 		let classEndLine = 0;
+		let classBraceDepth = 0;
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
@@ -199,14 +215,20 @@ export async function extractChangedSymbols(
 			}
 
 			for (const pattern of SYMBOL_DECLARATION_PATTERNS) {
+				// If pattern requires class scope and we're not in one, skip
+				if (pattern.requiresClassScope && !currentClass) continue;
+
 				const m = line.match(pattern.match);
 				if (!m) continue;
 
 				const name = m[pattern.nameGroup];
 				if (!name) continue;
 
-				// Skip common non-symbol names
-				if (["constructor", "if", "for", "while", "switch", "return", "catch", "try"].includes(name)) continue;
+				// Skip names in the comprehensive skip list
+				if (SYMBOL_SKIP_LIST.has(name)) continue;
+
+				// In schema/entity files, only track exports (not methods/internal functions)
+				if (isSchemaFile && !line.trimStart().startsWith("export")) continue;
 
 				const symbolEndLine = findSymbolEnd(lines, lineNumber);
 				const { confidence, isChanged } = symbolConfidence(lineNumber, symbolEndLine, diffFile.changedRanges);
@@ -220,7 +242,7 @@ export async function extractChangedSymbols(
 					classEndLine = symbolEndLine;
 				}
 
-				const qualifiedName = pattern.kind === "method" && currentClass ? `${currentClass}.${name}` : name;
+				const qualifiedName = (pattern.kind === "method") && currentClass ? `${currentClass}.${name}` : name;
 
 				const location: FileLocation = {
 					filePath: diffFile.filePath,
