@@ -173,8 +173,18 @@ export async function analyzeWithTypeScript(
 		warnings.push("No entrypoints detected. All changed symbols listed as untraced.");
 	}
 
+	// Diagnostic: report symbol counts
+	const changedSymCount = allSymbols.filter((s) => s.isChanged).length;
+	warnings.push(`Analysis: ${allSymbols.length} symbols found (${changedSymCount} changed), ${entrypoints.length} entrypoints detected.`);
+
 	// Stage 5: Build call graphs from entrypoints using type checker
+	const symbolMapSize = allSymbols.length;
 	const behaviors = buildBehaviorsFromEntrypoints(entrypoints, allSymbols, changedRangesMap, cwd, warnings);
+
+	// Diagnostic: report how many symbols were discovered on-the-fly
+	// The symbolMap inside buildBehaviorsFromEntrypoints grows as calls are traced
+	const totalTraced = behaviors.reduce((sum, b) => sum + b.totalStepCount, 0);
+	warnings.push(`Tracing: ${totalTraced} steps across ${behaviors.length} flows.`);
 
 	// Stage 6: Identify orphaned symbols
 	const tracedKeys = new Set<string>();
@@ -663,6 +673,9 @@ function filterRelevantSteps(rawSteps: RawStep[]): RawStep[] {
  * CRITICAL: When the type checker resolves a call to a function NOT in symbolMap,
  * we create an AnalyzedSymbol on-the-fly and ADD it to symbolMap. This allows
  * traceCallChainFull to follow the chain through unchanged code.
+ *
+ * Uses multiple resolution strategies because getSymbol() alone misses many
+ * common patterns (aliased imports, property access chains, re-exports).
  */
 function resolveOutgoingCalls(node: Node, symbolMap: Map<string, AnalyzedSymbol>, cwd: string): string[] {
 	const calleeKeys: string[] = [];
@@ -673,60 +686,10 @@ function resolveOutgoingCalls(node: Node, symbolMap: Map<string, AnalyzedSymbol>
 
 		for (const call of callExpressions) {
 			try {
-				const expr = call.getExpression();
-
-				// Try to resolve via the type checker
-				const tsSym = expr.getSymbol();
-				if (!tsSym) continue;
-
-				const declarations = tsSym.getDeclarations();
-				if (declarations.length === 0) continue;
-
-				const decl = declarations[0];
-				const declFile = decl.getSourceFile().getFilePath();
-
-				// Skip calls into node_modules
-				if (declFile.includes("/node_modules/")) continue;
-
-				const relPath = makeRelative(declFile, cwd);
-				// Skip if the file is outside the project (absolute path didn't resolve)
-				if (relPath.startsWith("/")) continue;
-
-				const declName = tsSym.getName();
-				const parentClass = getParentClassName(decl);
-				const qualified = parentClass ? `${parentClass}.${declName}` : declName;
-
-				// Check if already in symbolMap
-				let resolvedName: string | null = null;
-				if (symbolMap.has(qualified)) {
-					resolvedName = qualified;
-				} else if (symbolMap.has(declName)) {
-					resolvedName = declName;
-				}
-
-				// NOT in symbolMap — create on-the-fly if it's a function/method
-				if (!resolvedName) {
-					const funcNode = findFunctionNode(decl);
-					if (funcNode) {
-						const newSym: AnalyzedSymbol = {
-							name: declName,
-							qualifiedName: qualified,
-							kind: parentClass ? "method" : "function",
-							filePath: relPath,
-							line: funcNode.getStartLineNumber(),
-							endLine: funcNode.getEndLineNumber(),
-							isChanged: false, // it's in an unchanged file
-							confidence: "high", // type checker resolved it
-							node: funcNode,
-						};
-						symbolMap.set(qualified, newSym);
-						resolvedName = qualified;
-					}
-				}
-
-				if (resolvedName && !seen.has(resolvedName)) {
-					seen.add(resolvedName);
-					calleeKeys.push(resolvedName);
+				const resolved = resolveCallExpression(call, symbolMap, cwd);
+				if (resolved && !seen.has(resolved)) {
+					seen.add(resolved);
+					calleeKeys.push(resolved);
 				}
 			} catch {
 				// Individual call resolution can fail — skip it
@@ -740,29 +703,158 @@ function resolveOutgoingCalls(node: Node, symbolMap: Map<string, AnalyzedSymbol>
 }
 
 /**
- * Given a declaration node (which might be a VariableDeclaration, Parameter,
- * FunctionDeclaration, MethodDeclaration, etc.), find the actual function body node
- * we can trace into. Returns null if the declaration isn't a function-like thing.
+ * Try multiple strategies to resolve a single call expression to a qualified name
+ * in the symbolMap. Creates on-the-fly symbols for calls to unchanged code.
+ */
+function resolveCallExpression(call: Node, symbolMap: Map<string, AnalyzedSymbol>, cwd: string): string | null {
+	const expr = (call as any).getExpression?.() as Node | undefined;
+	if (!expr) return null;
+
+	// Strategy 1: getSymbol() on the expression
+	let tsSym = expr.getSymbol?.() ?? null;
+
+	// Strategy 2: For aliased imports, follow the alias
+	if (tsSym) {
+		try {
+			const aliased = tsSym.getAliasedSymbol?.();
+			if (aliased) tsSym = aliased;
+		} catch { /* not an alias */ }
+	}
+
+	// Strategy 3: For property access (this.foo(), obj.foo()), try the property symbol
+	if (!tsSym && Node.isPropertyAccessExpression(expr)) {
+		try {
+			const nameNode = expr.getNameNode();
+			tsSym = nameNode.getSymbol?.() ?? null;
+			if (tsSym) {
+				try {
+					const aliased = tsSym.getAliasedSymbol?.();
+					if (aliased) tsSym = aliased;
+				} catch { /* not an alias */ }
+			}
+		} catch { /* ignore */ }
+	}
+
+	// Strategy 4: Use the type of the expression to find the call signature
+	if (!tsSym) {
+		try {
+			const exprType = expr.getType();
+			const callSignatures = exprType.getCallSignatures();
+			if (callSignatures.length > 0) {
+				const returnDecl = callSignatures[0].getDeclaration();
+				if (returnDecl) {
+					tsSym = returnDecl.getSymbol?.() ?? null;
+				}
+			}
+		} catch { /* ignore */ }
+	}
+
+	if (!tsSym) return null;
+
+	const declarations = tsSym.getDeclarations();
+	if (declarations.length === 0) return null;
+
+	const decl = declarations[0];
+	const declFile = decl.getSourceFile().getFilePath();
+
+	// Skip calls into node_modules
+	if (declFile.includes("/node_modules/")) return null;
+
+	const relPath = makeRelative(declFile, cwd);
+	// Skip if the file is outside the project
+	if (relPath.startsWith("/")) return null;
+
+	const declName = tsSym.getName();
+	// Skip anonymous or internal names
+	if (!declName || declName === "__function" || declName === "__object") return null;
+
+	const parentClass = getParentClassName(decl);
+	const qualified = parentClass ? `${parentClass}.${declName}` : declName;
+
+	// Check if already in symbolMap
+	if (symbolMap.has(qualified)) return qualified;
+	if (symbolMap.has(declName)) return declName;
+
+	// NOT in symbolMap — create on-the-fly if it's a function-like thing
+	const funcNode = findFunctionNode(decl);
+	if (!funcNode) return null;
+
+	const newSym: AnalyzedSymbol = {
+		name: declName,
+		qualifiedName: qualified,
+		kind: parentClass ? "method" : "function",
+		filePath: relPath,
+		line: funcNode.getStartLineNumber(),
+		endLine: funcNode.getEndLineNumber(),
+		isChanged: false,
+		confidence: "high",
+		node: funcNode,
+	};
+	symbolMap.set(qualified, newSym);
+	return qualified;
+}
+
+/**
+ * Given a declaration node, find the actual function body node we can trace into.
+ * Handles: FunctionDeclaration, MethodDeclaration, ArrowFunction, FunctionExpression,
+ * VariableDeclaration (with fn initializer), PropertyAssignment, ShorthandPropertyAssignment,
+ * and follows through to the value expression where possible.
  */
 function findFunctionNode(decl: Node): Node | null {
 	// Direct function/method declarations
 	if (Node.isFunctionDeclaration(decl) || Node.isMethodDeclaration(decl)) {
 		return decl;
 	}
+	// Arrow functions and function expressions directly
+	if (Node.isArrowFunction(decl) || Node.isFunctionExpression(decl)) {
+		return decl;
+	}
 	// Variable declaration: const foo = () => {} or const foo = function() {}
 	if (Node.isVariableDeclaration(decl)) {
 		const init = decl.getInitializer();
-		if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
-			return init;
+		if (!init) return null;
+		if (Node.isArrowFunction(init) || Node.isFunctionExpression(init)) return init;
+		// const foo = someOtherFunction — follow through
+		if (Node.isIdentifier(init)) {
+			const sym = init.getSymbol();
+			if (sym) {
+				const innerDecls = sym.getDeclarations();
+				if (innerDecls.length > 0) return findFunctionNode(innerDecls[0]);
+			}
 		}
+		return null;
 	}
-	// Parameter (e.g., callback) — skip, we can't meaningfully trace into parameters
-	// PropertyAssignment, ShorthandPropertyAssignment — try to find the value
+	// PropertyAssignment: { foo: () => {} }
 	if (Node.isPropertyAssignment(decl)) {
 		const init = decl.getInitializer();
-		if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
-			return init;
+		if (!init) return null;
+		if (Node.isArrowFunction(init) || Node.isFunctionExpression(init)) return init;
+		// { foo: someFunc } — follow through
+		if (Node.isIdentifier(init)) {
+			const sym = init.getSymbol();
+			if (sym) {
+				const innerDecls = sym.getDeclarations();
+				if (innerDecls.length > 0) return findFunctionNode(innerDecls[0]);
+			}
 		}
+		return null;
+	}
+	// ShorthandPropertyAssignment: { perform } — follow to the referenced value
+	if (Node.isShorthandPropertyAssignment(decl)) {
+		try {
+			const sym = decl.getNameNode().getSymbol();
+			if (sym) {
+				// Follow the alias to the actual declaration
+				const aliased = sym.getAliasedSymbol?.() ?? sym;
+				const innerDecls = aliased.getDeclarations();
+				if (innerDecls.length > 0) return findFunctionNode(innerDecls[0]);
+			}
+		} catch { /* ignore */ }
+		return null;
+	}
+	// GetAccessor/SetAccessor
+	if (Node.isGetAccessorDeclaration(decl) || Node.isSetAccessorDeclaration(decl)) {
+		return decl;
 	}
 	return null;
 }
