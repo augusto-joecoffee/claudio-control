@@ -134,7 +134,33 @@ export function useKanbanState(repoId: string | null) {
     [repoId, mutate],
   );
 
+  const reorderInColumn = useCallback(
+    (columnId: string, orderedSessionIds: string[]) => {
+      if (!repoId) return;
+      setLocalState((prev) => {
+        const s = prev ?? { placements: [], outputHistory: {} };
+        const inColumn = s.placements.filter((p) => p.columnId === columnId);
+        const others = s.placements.filter((p) => p.columnId !== columnId);
+        const sorted = orderedSessionIds
+          .map((id) => inColumn.find((p) => p.sessionId === id))
+          .filter(Boolean) as KanbanCardPlacement[];
+        // Append any that weren't in orderedSessionIds (safety)
+        for (const p of inColumn) {
+          if (!orderedSessionIds.includes(p.sessionId)) sorted.push(p);
+        }
+        const next = { ...s, placements: [...others, ...sorted] };
+        fetch(`/api/kanban/${encodeURIComponent(repoId)}/state`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        }).catch((err) => console.error("Failed to save reorder:", err));
+        return next;
+      });
+    },
+    [repoId],
+  );
+
   const refreshState = useCallback(() => mutate(), [mutate]);
 
-  return { state, moveCard, assignCard, unassignCard, refreshState };
+  return { state, moveCard, assignCard, unassignCard, reorderInColumn, refreshState };
 }

@@ -316,13 +316,17 @@ export function linesToConversation(lines: JsonlLine[]): ConversationMessage[] {
 
     if (line.type === "user" && typeof line.message.content === "string") {
       const rawText = line.message.content.trim();
-      // Skip system-injected messages (XML tags like <system-reminder>)
-      if (isSystemMessage(rawText)) continue;
+      // System-injected messages start with XML tags — strip them but keep user content
+      let text: string | null = rawText;
+      if (isSystemMessage(rawText)) {
+        text = stripXmlTags(rawText);
+        if (!text) continue; // Pure system message with no user content
+      }
 
       messages.push({
         type: "user",
         timestamp: line.timestamp || "",
-        text: line.message.content,
+        text,
         toolUses: [],
       });
     } else if (line.type === "assistant" && Array.isArray(line.message.content)) {
@@ -341,6 +345,7 @@ export function linesToConversation(lines: JsonlLine[]): ConversationMessage[] {
         timestamp: line.timestamp || "",
         text,
         toolUses,
+        stopReason: line.message.stop_reason ?? null,
       });
     }
   }

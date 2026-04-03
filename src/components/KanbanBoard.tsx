@@ -12,7 +12,7 @@ import {
   type DragStartEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
-import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, horizontalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type {
@@ -87,6 +87,7 @@ interface KanbanBoardProps {
   renderCard: (session: ClaudeSession) => ReactNode;
   onMoveCard: (sessionId: string, toColumnId: string) => void;
   onUnstageCard: (sessionId: string) => void;
+  onReorderInColumn: (columnId: string, sessionIds: string[]) => void;
   onEditColumn: (columnId: string) => void;
   onAddColumn: () => void;
 }
@@ -98,6 +99,7 @@ export function KanbanBoard({
   renderCard,
   onMoveCard,
   onUnstageCard,
+  onReorderInColumn,
   onEditColumn,
   onAddColumn,
 }: KanbanBoardProps) {
@@ -109,12 +111,13 @@ export function KanbanBoard({
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
-  // Group sessions by column placement
+  // Group sessions by column placement, preserving placement order
   const getSessionsForColumn = (columnId: string): ClaudeSession[] => {
     const placedIds = state.placements
       .filter((p) => p.columnId === columnId)
       .map((p) => p.sessionId);
-    return sessions.filter((s) => placedIds.includes(s.id));
+    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+    return placedIds.map((id) => sessionMap.get(id)).filter(Boolean) as ClaudeSession[];
   };
 
   // Sessions not assigned to any column
@@ -184,7 +187,17 @@ export function KanbanBoard({
     if (!targetColumnId) return;
 
     const currentColumn = getColumnForSession(sessionId);
-    if (currentColumn === targetColumnId) return;
+    if (currentColumn === targetColumnId) {
+      // Same column — reorder within column
+      const columnSessions = getSessionsForColumn(targetColumnId);
+      const ids = columnSessions.map((s) => s.id);
+      const oldIndex = ids.indexOf(sessionId);
+      const newIndex = ids.indexOf(over.id as string);
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        onReorderInColumn(targetColumnId, arrayMove(ids, oldIndex, newIndex));
+      }
+      return;
+    }
 
     onMoveCard(sessionId, targetColumnId);
   };

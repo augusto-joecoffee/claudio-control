@@ -107,14 +107,20 @@ export function SessionCard({
   const styles = cardStyles[displayStatus];
   const [cleanupState, setCleanupState] = useState<"idle" | "confirm" | "cleaning" | "done">("idle");
   const [collapsed, setCollapsed] = useState(() => getCollapsedCards().has(session.id));
+  const [autoExpanded, setAutoExpanded] = useState(false);
 
   // Auto-expand when session needs user input
   useEffect(() => {
     if (session.status === "waiting" && collapsed) {
+      setAutoExpanded(true);
       setCollapsed(false);
       const ids = getCollapsedCards();
       ids.delete(session.id);
       persistCollapsedCards(ids);
+    }
+    // Clear auto-expanded flag when session leaves waiting state on its own
+    if (session.status !== "waiting") {
+      setAutoExpanded(false);
     }
   }, [session.status, session.id, collapsed]);
 
@@ -198,7 +204,7 @@ export function SessionCard({
     <div className="relative">
       <div
         onClick={onSelect}
-        className={`group relative flex flex-col rounded-xl border bg-[#0a0a0f]/80 backdrop-blur-xs p-5 card-hover cursor-pointer ${selected ? "ring-2 ring-blue-400 border-blue-400/50 shadow-[0_0_30px_rgba(96,165,250,0.25),0_0_60px_rgba(96,165,250,0.10)] scale-[1.02]" : styles.border} ${!selected ? styles.glow : ""} ${pulse ? "attention-pulse" : ""} ${cleanupState === "cleaning" ? "opacity-50 pointer-events-none" : ""}`}
+        className={`group relative flex flex-col justify-between rounded-xl border bg-[#0a0a0f]/80 backdrop-blur-xs p-5 min-h-[176px] card-hover cursor-pointer ${selected ? "ring-2 ring-blue-400 border-blue-400/50 shadow-[0_0_30px_rgba(96,165,250,0.25),0_0_60px_rgba(96,165,250,0.10)] scale-[1.02]" : styles.border} ${!selected ? styles.glow : ""} ${pulse ? "attention-pulse" : ""} ${cleanupState === "cleaning" ? "opacity-50 pointer-events-none" : ""}`}
       >
         {/* Gradient accent at top */}
         <div
@@ -222,7 +228,7 @@ export function SessionCard({
           </div>
         )}
 
-        <div className="relative flex flex-col">
+        <div className="relative flex flex-col flex-1">
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
             <div className="min-w-0 flex-1">
@@ -316,6 +322,14 @@ export function SessionCard({
                   hasPendingToolUse={session.hasPendingToolUse}
                   onActed={(action) => {
                     if (action !== "reply") onApproveReject?.(action);
+                    // Re-collapse if the card was auto-expanded for this notification
+                    if (autoExpanded) {
+                      setAutoExpanded(false);
+                      setCollapsed(true);
+                      const ids = getCollapsedCards();
+                      ids.add(session.id);
+                      persistCollapsedCards(ids);
+                    }
                   }}
                 />
               )}
@@ -328,6 +342,9 @@ export function SessionCard({
               </div>
             </>
           )}
+
+          {/* Spacer pushes actions to bottom of card */}
+          <div className="flex-1" />
 
           {/* Confirmation bar — slides in over the actions */}
           {cleanupState === "confirm" ? (

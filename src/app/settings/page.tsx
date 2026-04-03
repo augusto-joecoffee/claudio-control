@@ -255,8 +255,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto overflow-y-auto h-full pb-12 pt-2">
-      <div className="flex items-center justify-between mb-8">
+    <div className="max-w-2xl mx-auto overflow-y-auto h-full pb-12 pt-2 px-4">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gradient">Settings</h1>
           <p className="text-sm text-zinc-500 mt-1">Configure your tools and preferences</p>
