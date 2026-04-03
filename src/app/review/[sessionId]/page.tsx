@@ -1,8 +1,9 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { memo, useCallback, useMemo, useRef, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ViewType } from "react-diff-view";
+import { useSession } from "@/hooks/useSession";
 import { useReview } from "@/hooks/useReview";
 import { useReviewDiff } from "@/hooks/useReviewDiff";
 import { useReviewQueue } from "@/hooks/useReviewQueue";
@@ -18,6 +19,27 @@ import { ReviewToolbar } from "@/components/review/ReviewToolbar";
 export default function ReviewPage() {
 	const params = useParams();
 	const sessionId = typeof params.sessionId === "string" ? decodeURIComponent(params.sessionId) : "";
+
+	// Close the review window when the session disappears (killed or exited)
+	const { error: sessionError } = useSession(sessionId);
+	const sessionGoneCount = useRef(0);
+	useEffect(() => {
+		if (!sessionId) return;
+		if (!sessionError) {
+			sessionGoneCount.current = 0;
+			return;
+		}
+		// Session returned an error (404) — count consecutive failures
+		sessionGoneCount.current++;
+		if (sessionGoneCount.current >= 2) {
+			const api = (window as unknown as { electronAPI?: { closeReviewWindow: (id: string) => Promise<void> } }).electronAPI;
+			if (api?.closeReviewWindow) {
+				api.closeReviewWindow(sessionId);
+			} else {
+				window.close();
+			}
+		}
+	}, [sessionId, sessionError]);
 
 	const { review, comments, addComment, refresh: refreshReview } = useReview(sessionId);
 	const [selectedCommit, setSelectedCommit] = useState("all");
@@ -51,6 +73,13 @@ export default function ReviewPage() {
 		paused,
 		onCommentResolved: handleCommentResolved,
 	});
+
+	// Refresh review data when a comment starts processing so the status
+	// badge updates from "Pending" to "Processing" without waiting for the
+	// next SWR revalidation cycle.
+	useEffect(() => {
+		if (processingId) refreshReview();
+	}, [processingId, refreshReview]);
 
 	const files = useMemo(() => {
 		if (!diff) return [];
@@ -96,6 +125,17 @@ export default function ReviewPage() {
 	const handleCancelComment = useCallback(() => {
 		setActiveComment(null);
 	}, []);
+
+	const handleReplyComment = useCallback(
+		async (parentId: string, content: string) => {
+			// Find the parent comment to get its file/line context
+			const parent = comments.find((c) => c.id === parentId);
+			if (!parent) return;
+			await addComment(parent.filePath, parent.line, content, parent.anchorSnippet, parent.endLine, parentId);
+			refreshQueue();
+		},
+		[comments, addComment, refreshQueue],
+	);
 
 	const handleCommentAction = useCallback(
 		async (commentId: string, action: "resolve" | "delete") => {
@@ -194,6 +234,7 @@ export default function ReviewPage() {
 							viewedCount={viewedCount}
 							totalFiles={files.length}
 							uncommittedFiles={uncommittedSet}
+							isLoading={diffLoading}
 						/>
 					</div>
 				) : (
@@ -209,31 +250,24 @@ export default function ReviewPage() {
 				)}
 
 				{/* Diff viewer */}
-				{diffLoading ? (
-					<div className="flex-1 flex items-center justify-center text-zinc-600">
-						<span className="flex items-center gap-2">
-							<span className="w-4 h-4 rounded-full border-2 border-zinc-700 border-t-zinc-400 animate-spin" />
-							Loading diff...
-						</span>
-					</div>
-				) : (
-					<DiffViewer
-						rawDiff={diff}
-						viewType={viewType}
-						comments={comments}
-						activeCommentLocation={activeComment}
-						onGutterClick={handleGutterClick}
-						onSubmitComment={handleSubmitComment}
-						onCancelComment={handleCancelComment}
-						onResolveComment={handleResolveComment}
-						onDeleteComment={handleDeleteComment}
-						selectedFile={selectedFile}
-						isViewed={isViewed}
-						onToggleViewed={toggleViewed}
-						sessionId={sessionId}
-						onOpenInEditor={handleOpenInEditor}
-					/>
-				)}
+				<DiffViewer
+					rawDiff={diff}
+					viewType={viewType}
+					comments={comments}
+					activeCommentLocation={activeComment}
+					onGutterClick={handleGutterClick}
+					onSubmitComment={handleSubmitComment}
+					onCancelComment={handleCancelComment}
+					onResolveComment={handleResolveComment}
+					onDeleteComment={handleDeleteComment}
+					onReplyComment={handleReplyComment}
+					selectedFile={selectedFile}
+					isViewed={isViewed}
+					onToggleViewed={toggleViewed}
+					sessionId={sessionId}
+					onOpenInEditor={handleOpenInEditor}
+					isLoading={diffLoading}
+				/>
 			</div>
 
 			{/* Bottom queue bar */}

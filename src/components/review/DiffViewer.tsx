@@ -27,11 +27,13 @@ interface DiffViewerProps {
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
+	onReplyComment?: (parentId: string, content: string) => void;
 	selectedFile: string | null;
 	isViewed?: (path: string) => boolean;
 	onToggleViewed?: (path: string) => void;
 	sessionId?: string;
 	onOpenInEditor?: (filePath: string) => void;
+	isLoading?: boolean;
 }
 
 function getFilePath(file: FileData): string {
@@ -161,6 +163,7 @@ const FileDiff = memo(function FileDiff({
 	onCancelComment,
 	onResolveComment,
 	onDeleteComment,
+	onReplyComment,
 	isViewed,
 	onToggleViewed,
 	sessionId,
@@ -175,6 +178,7 @@ const FileDiff = memo(function FileDiff({
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
+	onReplyComment?: (parentId: string, content: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
@@ -277,6 +281,7 @@ const FileDiff = memo(function FileDiff({
 						onCancelComment={onCancelComment}
 						onResolveComment={onResolveComment}
 						onDeleteComment={onDeleteComment}
+						onReplyComment={onReplyComment}
 					/>
 				);
 			}
@@ -303,7 +308,7 @@ const FileDiff = memo(function FileDiff({
 		}
 
 		return w;
-	}, [fileComments, activeCommentLocation, filePath, expandedHunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment]);
+	}, [fileComments, activeCommentLocation, filePath, expandedHunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment, onReplyComment]);
 
 	const handleLineClick = useCallback(
 		(newLine: number, shiftKey: boolean) => {
@@ -347,6 +352,7 @@ const FileDiff = memo(function FileDiff({
 					<span
 						className="cursor-pointer hover:bg-violet-500/20 rounded px-0.5"
 						title="Click to comment · Shift+click to select range"
+						data-comment-line={newLine ?? undefined}
 						onClick={(e) => {
 							e.stopPropagation();
 							if (newLine !== null) handleLineClick(newLine, e.shiftKey);
@@ -360,6 +366,19 @@ const FileDiff = memo(function FileDiff({
 		},
 		[viewType, handleLineClick],
 	);
+
+	// Delegate clicks on the gutter <td> to trigger comments even when clicking
+	// outside the line number text itself.
+	const handleGutterCellClick = useCallback((e: React.MouseEvent) => {
+		const td = (e.target as HTMLElement).closest("td.diff-gutter");
+		if (!td) return;
+		// Don't double-fire if the click was already on the inner span
+		const span = td.querySelector("[data-comment-line]") as HTMLElement | null;
+		if (!span) return;
+		if (span.contains(e.target as Node)) return;
+		const line = Number(span.dataset.commentLine);
+		if (!Number.isNaN(line)) handleLineClick(line, e.shiftKey);
+	}, [handleLineClick]);
 
 	return (
 		<div ref={fileRef} id={`file-${filePath}`} className="mb-4 mx-4 first:mt-3">
@@ -402,7 +421,7 @@ const FileDiff = memo(function FileDiff({
 			</div>
 
 			{/* Diff content — collapse when viewed */}
-			{!isViewed && <div className="border border-t-0 border-[#21262d] rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }}>
+			{!isViewed && <div className="border border-t-0 border-[#21262d] rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }} onClick={handleGutterCellClick}>
 				{expandedHunks.length > 0 ? (
 					<Diff
 						viewType={viewType}
@@ -496,6 +515,7 @@ function LazyFileDiff(props: {
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
+	onReplyComment?: (parentId: string, content: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
@@ -509,15 +529,33 @@ function LazyFileDiff(props: {
 		if (!el) return;
 		const observer = new IntersectionObserver(
 			([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
-			{ rootMargin: "200px" },
+			{ rootMargin: "800px" },
 		);
 		observer.observe(el);
 		return () => observer.disconnect();
 	}, []);
 
 	if (!visible) {
+		const filePath = props.file.newPath === "/dev/null" ? props.file.oldPath : props.file.newPath;
 		const lineCount = props.file.hunks.reduce((n, h) => n + h.changes.length, 0);
-		return <div ref={ref} style={{ minHeight: Math.max(60, lineCount * 20) }} className="mb-4 mx-4" />;
+		return (
+			<div ref={ref} style={{ minHeight: Math.max(60, lineCount * 20) }} className="mb-4 mx-4">
+				<div className="px-3 py-1.5 bg-[#161b22] border border-[#21262d] rounded-t-lg flex items-center gap-2">
+					<span className={`text-[10px] font-bold shrink-0 ${
+						props.file.type === "add" ? "text-emerald-400" : props.file.type === "delete" ? "text-red-400" : "text-amber-400"
+					}`}>
+						{props.file.type === "add" ? "NEW" : props.file.type === "delete" ? "DEL" : "MOD"}
+					</span>
+					<span className="text-xs text-zinc-500 font-mono truncate">{filePath}</span>
+				</div>
+				<div className="border border-t-0 border-[#21262d] rounded-b-lg px-3 py-2">
+					<div className="flex items-center gap-2 text-zinc-700 text-xs">
+						<span className="w-3.5 h-3.5 rounded-full border-2 border-zinc-800 border-t-zinc-600 animate-spin" />
+						Loading diff…
+					</div>
+				</div>
+			</div>
+		);
 	}
 
 	return <FileDiff {...props} />;
@@ -538,6 +576,8 @@ export const DiffViewer = memo(function DiffViewer({
 	onToggleViewed,
 	sessionId,
 	onOpenInEditor,
+	isLoading,
+	onReplyComment,
 }: DiffViewerProps) {
 	const files = useMemo(() => {
 		if (!rawDiff) return [];
@@ -550,6 +590,28 @@ export const DiffViewer = memo(function DiffViewer({
 	}, [rawDiff]);
 
 	if (files.length === 0) {
+		if (isLoading) {
+			return (
+				<div className="flex-1 overflow-y-auto">
+					{Array.from({ length: 5 }).map((_, i) => (
+						<div key={i} className="mb-4 mx-4 first:mt-3 animate-pulse">
+							<div className="px-3 py-1.5 bg-[#161b22] border border-[#21262d] rounded-t-lg flex items-center gap-2">
+								<div className="w-7 h-3.5 rounded bg-zinc-800/80" />
+								<div className="h-3.5 rounded bg-zinc-800/50 flex-1" style={{ maxWidth: `${30 + (i * 23) % 50}%` }} />
+							</div>
+							<div className="border border-t-0 border-[#21262d] rounded-b-lg p-3 space-y-2">
+								{Array.from({ length: 3 + (i % 3) }).map((_, j) => (
+									<div key={j} className="flex gap-2">
+										<div className="w-8 h-3.5 rounded bg-zinc-800/30 shrink-0" />
+										<div className="h-3.5 rounded bg-zinc-800/20 flex-1" style={{ maxWidth: `${40 + (j * 31) % 55}%` }} />
+									</div>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			);
+		}
 		return (
 			<div className="flex-1 flex items-center justify-center text-zinc-600 text-sm">
 				No changes to review
@@ -574,6 +636,7 @@ export const DiffViewer = memo(function DiffViewer({
 					onCancelComment={onCancelComment}
 					onResolveComment={onResolveComment}
 					onDeleteComment={onDeleteComment}
+					onReplyComment={onReplyComment}
 					isViewed={isViewed?.(selectedFile) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(selectedFile!) : undefined}
 					sessionId={sessionId}
@@ -600,6 +663,7 @@ export const DiffViewer = memo(function DiffViewer({
 					onCancelComment={onCancelComment}
 					onResolveComment={onResolveComment}
 					onDeleteComment={onDeleteComment}
+					onReplyComment={onReplyComment}
 					isViewed={isViewed?.(fp) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(fp) : undefined}
 					sessionId={sessionId}

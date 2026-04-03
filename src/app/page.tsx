@@ -135,8 +135,8 @@ export default function Dashboard() {
     });
     setActiveTerminalDir((prev) => (prev === dir ? null : prev));
     // Refresh session list after process dies (second refresh catches tmux kill propagation)
+    setTimeout(() => refresh(), 500);
     setTimeout(() => refresh(), 1500);
-    setTimeout(() => refresh(), 4000);
   }, [refresh]);
 
   const handleMinimizeTerminal = useCallback(() => {

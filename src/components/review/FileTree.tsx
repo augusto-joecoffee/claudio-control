@@ -14,6 +14,7 @@ interface FileTreeProps {
 	viewedCount?: number;
 	totalFiles?: number;
 	uncommittedFiles?: Set<string>;
+	isLoading?: boolean;
 }
 
 function fileStatus(type: string): { label: string; color: string } {
@@ -43,13 +44,13 @@ function countChanges(file: FileData): { additions: number; deletions: number } 
 	return { additions, deletions };
 }
 
-export const FileTree = memo(function FileTree({ files, selectedFile, commentCounts, onSelectFile, onCollapse, isViewed, onToggleViewed, viewedCount, totalFiles, uncommittedFiles }: FileTreeProps) {
+export const FileTree = memo(function FileTree({ files, selectedFile, commentCounts, onSelectFile, onCollapse, isViewed, onToggleViewed, viewedCount, totalFiles, uncommittedFiles, isLoading }: FileTreeProps) {
 	return (
 		<div className="flex flex-col h-full">
 			<div className="px-3 py-2 border-b border-zinc-800/50 flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					<h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-						Files ({files.length})
+						Files {isLoading ? "" : `(${files.length})`}
 					</h2>
 					{viewedCount != null && totalFiles != null && totalFiles > 0 && (
 						<span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
@@ -70,6 +71,16 @@ export const FileTree = memo(function FileTree({ files, selectedFile, commentCou
 				)}
 			</div>
 			<div className="flex-1 overflow-y-auto py-1">
+				{isLoading && files.length === 0 && (
+					Array.from({ length: 12 }).map((_, i) => (
+						<div key={i} className="flex items-center gap-2 px-3 py-1.5 border-l-2 border-transparent animate-pulse">
+							<div className="w-3.5 h-3.5 rounded bg-zinc-800/80 shrink-0" />
+							<div className="w-3 h-3 rounded bg-zinc-800/60 shrink-0" />
+							<div className="h-3 rounded bg-zinc-800/50 flex-1" style={{ maxWidth: `${50 + (i * 17) % 80}%` }} />
+							<div className="h-3 w-8 rounded bg-zinc-800/40 shrink-0" />
+						</div>
+					))
+				)}
 				{files.map((file) => {
 					const filePath = file.newPath === "/dev/null" ? file.oldPath : file.newPath;
 					const { label, color } = fileStatus(file.type);

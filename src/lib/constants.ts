@@ -3,7 +3,7 @@ import { join } from "path";
 
 export const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 export const CLAUDE_HISTORY_FILE = join(homedir(), ".claude", "history.jsonl");
-export const POLL_INTERVAL_MS = 3000;
+export const POLL_INTERVAL_MS = 2000;
 export const FINISHED_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const JSONL_TAIL_LINES = 50;
 export const JSONL_HEAD_LINES = 30;
@@ -18,7 +18,7 @@ export const WORKING_THRESHOLD_MS = 10 * 1000;
 export const PROCESS_TIMEOUT_MS = 5000;
 export const APPLESCRIPT_FOCUS_DELAY_S = 0.2;
 export const APPROVAL_SETTLE_MS = 3000;
-export const ORPHAN_CHECK_INTERVAL_MS = 30_000;
+export const ORPHAN_CHECK_INTERVAL_MS = 8_000;
 /** How long a session must be idle (no JSONL activity) before auto-cascade triggers. */
 export const CASCADE_SETTLE_MS = 30_000;
 /** How long to wait for a sent prompt to be acknowledged (UserPromptSubmit) before allowing cascade. */

@@ -1,14 +1,15 @@
 "use client";
 
-import { memo, useMemo, useState, useRef, useEffect } from "react";
+import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
 import type { ReviewComment, ReviewCommentStatus } from "@/lib/types";
 
 interface CommentInputProps {
 	onSubmit: (content: string) => void;
 	onCancel: () => void;
+	placeholder?: string;
 }
 
-function CommentInput({ onSubmit, onCancel }: CommentInputProps) {
+function CommentInput({ onSubmit, onCancel, placeholder = "Write a review comment..." }: CommentInputProps) {
 	const [text, setText] = useState("");
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -33,7 +34,7 @@ function CommentInput({ onSubmit, onCancel }: CommentInputProps) {
 				value={text}
 				onChange={(e) => setText(e.target.value)}
 				onKeyDown={handleKeyDown}
-				placeholder="Write a review comment..."
+				placeholder={placeholder}
 				className="w-full p-2.5 text-xs bg-transparent text-zinc-200 placeholder-zinc-600 resize-none outline-none min-h-[60px]"
 				rows={3}
 			/>
@@ -105,13 +106,25 @@ const statusConfig: Record<ReviewCommentStatus, { label: string; color: string; 
 
 interface CommentDisplayProps {
 	comment: ReviewComment;
+	replies: ReviewComment[];
 	onResolve?: (id: string) => void;
 	onDelete?: (id: string) => void;
+	onReply?: (parentId: string, content: string) => void;
 }
 
-const CommentDisplay = memo(function CommentDisplay({ comment, onResolve, onDelete }: CommentDisplayProps) {
+const CommentDisplay = memo(function CommentDisplay({ comment, replies, onResolve, onDelete, onReply }: CommentDisplayProps) {
 	const { label, color, bg } = statusConfig[comment.status];
 	const [minimized, setMinimized] = useState(comment.status === "resolved");
+	const [replyingTo, setReplyingTo] = useState(false);
+
+	const handleReplySubmit = useCallback((content: string) => {
+		onReply?.(comment.id, content);
+		setReplyingTo(false);
+	}, [comment.id, onReply]);
+
+	const handleReplyCancel = useCallback(() => {
+		setReplyingTo(false);
+	}, []);
 
 	return (
 		<div className={`mx-2 my-1.5 rounded-lg border overflow-hidden ${
@@ -176,6 +189,68 @@ const CommentDisplay = memo(function CommentDisplay({ comment, onResolve, onDele
 							<FormattedText text={comment.response} />
 						</div>
 					)}
+					{/* Replies */}
+					{replies.length > 0 && (
+						<div className="border-t border-zinc-800/50">
+							{replies.map((reply) => {
+								const rs = statusConfig[reply.status];
+								return (
+									<div key={reply.id} className="border-t border-zinc-800/30 first:border-t-0">
+										<div className="flex items-center justify-between px-2.5 py-1 bg-zinc-900/30">
+											<span className="text-[10px] text-zinc-600">
+												Reply · {new Date(reply.createdAt).toLocaleTimeString()}
+											</span>
+											<div className="flex items-center gap-1.5">
+												<span className={`text-[10px] px-1.5 py-0.5 rounded-full ${rs.bg} ${rs.color}`}>
+													{rs.label}
+													{reply.status === "processing" && (
+														<span className="inline-block ml-1 w-2 h-2 rounded-full border border-blue-400 border-t-transparent animate-spin" />
+													)}
+												</span>
+												{onDelete && (
+													<button
+														onClick={() => onDelete(reply.id)}
+														className="text-zinc-600 hover:text-red-400 transition-colors p-0.5"
+														title="Delete reply"
+													>
+														<svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+															<path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+														</svg>
+													</button>
+												)}
+											</div>
+										</div>
+										<div className="px-2.5 py-1.5 text-xs text-zinc-300 whitespace-pre-wrap">{reply.content}</div>
+										{reply.response && (
+											<div className="px-2.5 py-1.5 bg-emerald-500/5">
+												<div className="text-[10px] text-emerald-500 mb-1 font-medium">Claude's response:</div>
+												<FormattedText text={reply.response} />
+											</div>
+										)}
+									</div>
+								);
+							})}
+						</div>
+					)}
+					{/* Reply button / input */}
+					{onReply && comment.status !== "resolved" && !replyingTo && (
+						<div className="border-t border-zinc-800/50 px-2.5 py-1.5">
+							<button
+								onClick={() => setReplyingTo(true)}
+								className="text-[11px] text-zinc-500 hover:text-violet-400 transition-colors flex items-center gap-1"
+							>
+								<svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+									<path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+								</svg>
+								Reply
+							</button>
+						</div>
+					)}
+					{replyingTo && (
+						<div className="border-t border-zinc-800/50">
+							<CommentInput onSubmit={handleReplySubmit} onCancel={handleReplyCancel} placeholder="Write a reply..." />
+						</div>
+					)}
 				</>
 			)}
 		</div>
@@ -189,13 +264,37 @@ interface CommentThreadProps {
 	onCancelComment: () => void;
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
+	onReplyComment?: (parentId: string, content: string) => void;
 }
 
-export const CommentThread = memo(function CommentThread({ comments, isAddingComment, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment }: CommentThreadProps) {
+export const CommentThread = memo(function CommentThread({ comments, isAddingComment, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment, onReplyComment }: CommentThreadProps) {
+	// Separate root comments from replies
+	const { roots, repliesByParent } = useMemo(() => {
+		const roots: ReviewComment[] = [];
+		const repliesByParent = new Map<string, ReviewComment[]>();
+		for (const c of comments) {
+			if (c.parentId) {
+				const arr = repliesByParent.get(c.parentId) ?? [];
+				arr.push(c);
+				repliesByParent.set(c.parentId, arr);
+			} else {
+				roots.push(c);
+			}
+		}
+		return { roots, repliesByParent };
+	}, [comments]);
+
 	return (
 		<div className="py-0.5">
-			{comments.map((comment) => (
-				<CommentDisplay key={comment.id} comment={comment} onResolve={onResolveComment} onDelete={onDeleteComment} />
+			{roots.map((comment) => (
+				<CommentDisplay
+					key={comment.id}
+					comment={comment}
+					replies={repliesByParent.get(comment.id) ?? []}
+					onResolve={onResolveComment}
+					onDelete={onDeleteComment}
+					onReply={onReplyComment}
+				/>
 			))}
 			{isAddingComment && <CommentInput onSubmit={onSubmitComment} onCancel={onCancelComment} />}
 		</div>

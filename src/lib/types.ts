@@ -198,6 +198,8 @@ export interface ReviewComment {
   resolvedAt: string | null;
   /** Claude's response after processing this comment. */
   response: string | null;
+  /** If this is a reply, the ID of the parent comment. */
+  parentId?: string;
 }
 
 export interface ReviewSession {

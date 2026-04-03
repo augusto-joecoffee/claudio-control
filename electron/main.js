@@ -526,6 +526,16 @@ ipcMain.handle("review:isOpen", (_event, { sessionId }) => {
   return { open: true };
 });
 
+// Close a review window for a specific session (e.g. when session is killed)
+ipcMain.handle("review:closeWindow", (_event, { sessionId }) => {
+  const win = reviewWindows.get(sessionId);
+  if (win && !win.isDestroyed()) {
+    saveWindowState(win, "review");
+    win.close();
+  }
+  reviewWindows.delete(sessionId);
+});
+
 // Capture window state in memory (not async disk) so the next window can use it immediately.
 function captureWindowState(win) {
   if (!win || win.isDestroyed()) return null;
