@@ -198,11 +198,14 @@ function formatReviewPrompt(commentId: string, filePath: string, line: number, a
 	const lineRef = endLine ? `lines ${line}-${endLine}` : `line ${line}`;
 	const tag = githubThreadId ? "[GitHub PR Review Reply]" : "[Code Review Comment]";
 	let prompt = `${tag} [id:${commentId}]\nFile: ${filePath} (${lineRef})`;
-	if (anchorSnippet) {
+	if (githubThreadId && anchorSnippet) {
+		// anchorSnippet contains the GitHub comment: "@author: body"
+		prompt += `\n\nGitHub PR review comment:\n${anchorSnippet}`;
+	} else if (anchorSnippet) {
 		prompt += `\n\nContext:\n\`\`\`\n${anchorSnippet}\n\`\`\``;
 	}
 	if (githubThreadId) {
-		prompt += `\n\nThis is a reply to a GitHub PR review comment. The user's instruction: "${content}"`;
+		prompt += `\n\nThe user's reply to the above GitHub comment: "${content}"`;
 	} else {
 		prompt += `\n\nComment: "${content}"`;
 	}
@@ -214,11 +217,22 @@ function formatReviewPrompt(commentId: string, filePath: string, line: number, a
 }
 
 async function postReplyToGitHub(threadId: string, userContent: string, claudeResponse: string, cwd: string): Promise<void> {
-	const body = `${userContent}\n\n---\n*Claude's response:*\n${claudeResponse}`;
-	const mutation = `mutation {
-		addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: "${threadId}", body: ${JSON.stringify(body)} }) {
+	// Post user's reply
+	const userMutation = `mutation {
+		addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: "${threadId}", body: ${JSON.stringify(userContent)} }) {
 			comment { id }
 		}
 	}`;
-	await execFileAsync("gh", ["api", "graphql", "-f", `query=${mutation}`], { cwd, timeout: 15000 });
+	await execFileAsync("gh", ["api", "graphql", "-f", `query=${userMutation}`], { cwd, timeout: 15000 });
+
+	// Post Claude's response as a separate reply
+	if (claudeResponse) {
+		const claudeBody = `🤖 *Claude's response:*\n\n${claudeResponse}`;
+		const claudeMutation = `mutation {
+			addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: "${threadId}", body: ${JSON.stringify(claudeBody)} }) {
+				comment { id }
+			}
+		}`;
+		await execFileAsync("gh", ["api", "graphql", "-f", `query=${claudeMutation}`], { cwd, timeout: 15000 });
+	}
 }

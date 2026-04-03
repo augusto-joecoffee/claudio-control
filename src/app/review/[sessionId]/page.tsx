@@ -71,7 +71,14 @@ export default function ReviewPage() {
 	const handleCommentResolved = useCallback(() => {
 		refreshReview();
 		handleRefreshDiff();
-	}, [refreshReview, handleRefreshDiff]);
+		// Refresh GitHub comments — a reply to a GitHub thread may have been posted
+		if (review?.prUrl) {
+			fetch(`/api/review/${encodeURIComponent(sessionId)}/github-comments?fresh=1`)
+				.then((r) => r.json())
+				.then((data) => refreshGitHubComments(data, { revalidate: false }))
+				.catch(() => {});
+		}
+	}, [refreshReview, handleRefreshDiff, review?.prUrl, sessionId, refreshGitHubComments]);
 
 	const { processingId, pendingCount, completedCount, sessionStatus, refresh: refreshQueue } = useReviewQueue(sessionId, {
 		paused,
@@ -101,12 +108,32 @@ export default function ReviewPage() {
 	const commentCounts = useMemo(() => {
 		const counts: Record<string, number> = {};
 		for (const c of comments) {
+			if (c.githubThreadId) continue; // GitHub thread replies are shown in the GitHub comment, not separately
 			counts[c.filePath] = (counts[c.filePath] ?? 0) + 1;
 		}
 		return counts;
 	}, [comments]);
 
-	const githubCommentFiles = useMemo(() => new Set(githubComments.map((c) => c.path)), [githubComments]);
+	const githubCommentFiles = useMemo(() => {
+		// Build lookup: oldPath → newPath for renames, plus filename → newPath for moved files
+		const oldToNew = new Map<string, string>();
+		const nameToNew = new Map<string, string>();
+		for (const f of files) {
+			const newPath = f.newPath === "/dev/null" ? f.oldPath : f.newPath;
+			if (f.oldPath && f.oldPath !== f.newPath && f.oldPath !== "/dev/null") {
+				oldToNew.set(f.oldPath, newPath);
+			}
+			const name = newPath.split("/").pop() ?? "";
+			if (name) nameToNew.set(name, newPath);
+		}
+		const result = new Set<string>();
+		for (const c of githubComments) {
+			// Try exact path, then old→new rename, then match by filename
+			const fileName = c.path.split("/").pop() ?? "";
+			result.add(oldToNew.get(c.path) ?? nameToNew.get(fileName) ?? c.path);
+		}
+		return result;
+	}, [githubComments, files]);
 
 	const handleGutterClick = useCallback((filePath: string, startLine: number, endLine: number, anchorSnippet: string) => {
 		setActiveComment((prev) => {
@@ -148,11 +175,29 @@ export default function ReviewPage() {
 			// Find the GitHub comment to get file/line context
 			const ghComment = githubComments.find((c) => c.threadId === threadId);
 			if (!ghComment) return;
-			// Create a local comment linked to the GitHub thread — goes through the queue
-			await addComment(ghComment.path, ghComment.line, content, "", undefined, undefined, threadId);
+
+			// Optimistic update — show the reply in the GitHub thread immediately
+			refreshGitHubComments(
+				(current) => {
+					if (!current) return current;
+					return {
+						comments: current.comments.map((c) =>
+							c.threadId === threadId
+								? { ...c, replies: [...c.replies, { id: `optimistic-${Date.now()}`, author: "you", body: content, createdAt: new Date().toISOString() }] }
+								: c,
+						),
+					};
+				},
+				{ revalidate: false },
+			);
+
+			// Store the GitHub comment body + author as anchorSnippet so the queue
+			// can include it in the prompt for Claude
+			const ghContext = `@${ghComment.author}: ${ghComment.body}\n\nGitHub URL: ${ghComment.url}`;
+			await addComment(ghComment.path, ghComment.line, content, ghContext, undefined, undefined, threadId);
 			refreshQueue();
 		},
-		[githubComments, addComment, refreshQueue],
+		[githubComments, addComment, refreshQueue, refreshGitHubComments],
 	);
 
 	const handleResolveGitHubThread = useCallback(

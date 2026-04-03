@@ -22,79 +22,93 @@ async function fetchGitHubComments(prUrl: string, cwd: string): Promise<GitHubRe
 	const parsed = parsePrNumber(prUrl);
 	if (!parsed) return [];
 
-	const query = `query {
-		repository(owner: "${parsed.owner}", name: "${parsed.repo}") {
-			pullRequest(number: ${parsed.number}) {
-				reviewThreads(first: 100) {
-					nodes {
-						id
-						isResolved
-						isOutdated
-						line
-						originalLine
-						startLine
-						originalStartLine
-						path
-						diffSide
-						comments(first: 50) {
-							nodes {
-								id
-								author { login }
-								body
-								createdAt
-								url
-								line
-								originalLine
-								startLine
-								originalStartLine
+	// Paginate through all review threads (GitHub max is 100 per page)
+	const allThreads: unknown[] = [];
+	let cursor: string | null = null;
+
+	for (;;) {
+		const afterClause = cursor ? `, after: "${cursor}"` : "";
+		const query = `query {
+			repository(owner: "${parsed.owner}", name: "${parsed.repo}") {
+				pullRequest(number: ${parsed.number}) {
+					reviewThreads(first: 100${afterClause}) {
+						pageInfo { hasNextPage endCursor }
+						nodes {
+							id
+							isResolved
+							isOutdated
+							line
+							originalLine
+							startLine
+							originalStartLine
+							path
+							diffSide
+							comments(first: 100) {
+								nodes {
+									id
+									author { login }
+									body
+									createdAt
+									url
+									line
+									originalLine
+									startLine
+									originalStartLine
 								}
+							}
 						}
 					}
 				}
 			}
-		}
-	}`;
+		}`;
 
-	const { stdout } = await execFileAsync("gh", ["api", "graphql", "-f", `query=${query}`], {
-		cwd,
-		timeout: 15000,
-	});
+		const { stdout } = await execFileAsync("gh", ["api", "graphql", "-f", `query=${query}`], {
+			cwd,
+			timeout: 15000,
+		});
 
-	const data = JSON.parse(stdout.trim());
-	const threads = data?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+		const data = JSON.parse(stdout.trim());
+		const page = data?.data?.repository?.pullRequest?.reviewThreads;
+		const nodes = page?.nodes ?? [];
+		allThreads.push(...nodes);
+
+		if (!page?.pageInfo?.hasNextPage) break;
+		cursor = page.pageInfo.endCursor;
+	}
 
 	const comments: GitHubReviewComment[] = [];
-	for (const thread of threads) {
+	for (const thread of allThreads as Record<string, unknown>[]) {
 		// Skip resolved threads
 		if (thread.isResolved) continue;
-		if (!thread.comments?.nodes?.length) continue;
+		const threadComments = (thread.comments as { nodes: Record<string, unknown>[] })?.nodes;
+		if (!threadComments?.length) continue;
 
-		const root = thread.comments.nodes[0];
-		const replies = thread.comments.nodes.slice(1).map((r: { id: string; author?: { login?: string }; body: string; createdAt: string }) => ({
-			id: r.id,
-			author: r.author?.login ?? "unknown",
-			body: r.body,
-			createdAt: r.createdAt,
+		const root = threadComments[0];
+		const replies = threadComments.slice(1).map((r) => ({
+			id: r.id as string,
+			author: (r.author as { login?: string })?.login ?? "unknown",
+			body: r.body as string,
+			createdAt: r.createdAt as string,
 		}));
 
 		// Resolve the best line number — prefer thread.line (new side), fall back to
 		// comment.line, then originalLine fields. Skip comments with no usable line.
-		const line = thread.line ?? root.line ?? thread.originalLine ?? root.originalLine ?? 0;
+		const line = (thread.line ?? root.line ?? thread.originalLine ?? root.originalLine ?? 0) as number;
 		if (line === 0) continue;
 
-		const startLine = thread.startLine ?? root.startLine ?? thread.originalStartLine ?? root.originalStartLine ?? undefined;
+		const startLine = (thread.startLine ?? root.startLine ?? thread.originalStartLine ?? root.originalStartLine ?? undefined) as number | undefined;
 
 		comments.push({
-			id: root.id,
-			threadId: thread.id,
-			author: root.author?.login ?? "unknown",
-			body: root.body,
-			path: thread.path ?? "",
+			id: root.id as string,
+			threadId: thread.id as string,
+			author: (root.author as { login?: string })?.login ?? "unknown",
+			body: root.body as string,
+			path: (thread.path ?? "") as string,
 			line,
 			startLine,
-			outdated: thread.isOutdated ?? false,
-			createdAt: root.createdAt,
-			url: root.url ?? "",
+			outdated: (thread.isOutdated ?? false) as boolean,
+			createdAt: root.createdAt as string,
+			url: (root.url ?? "") as string,
 			replies,
 		});
 	}
@@ -112,6 +126,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 
 	if (!review.prUrl) {
 		return NextResponse.json({ comments: [] });
+	}
+
+	// Allow cache busting
+	const reqUrl = new URL(_request.url);
+	if (reqUrl.searchParams.has("fresh")) {
+		cache.delete(review.prUrl);
 	}
 
 	// Check cache

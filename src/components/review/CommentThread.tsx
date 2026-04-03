@@ -1,5 +1,7 @@
 "use client";
 
+import Markdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
 import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
 import type { GitHubReviewComment, ReviewComment, ReviewCommentStatus } from "@/lib/types";
 
@@ -60,40 +62,51 @@ function CommentInput({ onSubmit, onCancel, placeholder = "Write a review commen
 	);
 }
 
-/** Render markdown-ish text: code blocks, inline code, bold, and paragraphs. */
-function FormattedText({ text }: { text: string }) {
-	const parts = useMemo(() => {
-		const result: React.ReactNode[] = [];
-		// Split on fenced code blocks first
-		const segments = text.split(/(```[\s\S]*?```)/g);
-		for (let i = 0; i < segments.length; i++) {
-			const seg = segments[i];
-			if (seg.startsWith("```")) {
-				const inner = seg.replace(/^```\w*\n?/, "").replace(/\n?```$/, "");
-				result.push(
-					<pre key={i} className="my-1.5 px-2.5 py-2 rounded bg-zinc-900 border border-zinc-800/50 text-[11px] text-zinc-300 overflow-x-auto font-mono">
-						{inner}
-					</pre>,
-				);
-			} else if (seg.trim()) {
-				// Process inline formatting: `code`, **bold**, *italic*
-				const inlineParts = seg.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-				const formatted = inlineParts.map((part, j) => {
-					if (part.startsWith("`") && part.endsWith("`")) {
-						return <code key={j} className="px-1 py-0.5 rounded bg-zinc-800 text-emerald-300 text-[11px] font-mono">{part.slice(1, -1)}</code>;
-					}
-					if (part.startsWith("**") && part.endsWith("**")) {
-						return <strong key={j} className="text-zinc-200">{part.slice(2, -2)}</strong>;
-					}
-					return part;
-				});
-				result.push(<span key={i} className="whitespace-pre-wrap">{formatted}</span>);
-			}
-		}
-		return result;
-	}, [text]);
+const mdComponents = {
+	p: ({ children }: { children?: React.ReactNode }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+	strong: ({ children }: { children?: React.ReactNode }) => <strong className="text-zinc-200">{children}</strong>,
+	em: ({ children }: { children?: React.ReactNode }) => <em className="text-zinc-300">{children}</em>,
+	code: ({ children, className }: { children?: React.ReactNode; className?: string }) =>
+		className ? (
+			<code className="text-[11px] text-zinc-300 font-mono">{children}</code>
+		) : (
+			<code className="px-1 py-0.5 rounded bg-zinc-800 text-emerald-300 text-[11px] font-mono">{children}</code>
+		),
+	pre: ({ children }: { children?: React.ReactNode }) => (
+		<pre className="my-1.5 px-2.5 py-2 rounded bg-zinc-900 border border-zinc-800/50 text-[11px] text-zinc-300 overflow-x-auto font-mono">{children}</pre>
+	),
+	a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+		<a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">{children}</a>
+	),
+	ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc list-inside mb-1.5 space-y-0.5">{children}</ul>,
+	ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal list-inside mb-1.5 space-y-0.5">{children}</ol>,
+	li: ({ children }: { children?: React.ReactNode }) => <li>{children}</li>,
+	h1: ({ children }: { children?: React.ReactNode }) => <div className="text-sm font-semibold text-zinc-200 mb-1">{children}</div>,
+	h2: ({ children }: { children?: React.ReactNode }) => <div className="text-xs font-semibold text-zinc-200 mb-1">{children}</div>,
+	h3: ({ children }: { children?: React.ReactNode }) => <div className="text-xs font-semibold text-zinc-300 mb-1">{children}</div>,
+	hr: () => <hr className="border-zinc-800 my-2" />,
+	blockquote: ({ children }: { children?: React.ReactNode }) => (
+		<blockquote className="border-l-2 border-zinc-700 pl-2.5 my-1.5 text-zinc-400 italic">{children}</blockquote>
+	),
+	details: ({ children }: { children?: React.ReactNode }) => <details className="my-1.5 border border-zinc-800 rounded px-2.5 py-1.5">{children}</details>,
+	summary: ({ children }: { children?: React.ReactNode }) => <summary className="text-xs font-medium text-zinc-300 cursor-pointer hover:text-zinc-100">{children}</summary>,
+	img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+		// eslint-disable-next-line @next/next/no-img-element
+		<img {...props} alt={props.alt ?? ""} className="max-w-full h-auto rounded my-1" />
+	),
+	table: ({ children }: { children?: React.ReactNode }) => <table className="border-collapse text-[11px] my-1.5 w-full">{children}</table>,
+	th: ({ children }: { children?: React.ReactNode }) => <th className="border border-zinc-800 px-2 py-1 bg-zinc-900 text-left text-zinc-300">{children}</th>,
+	td: ({ children }: { children?: React.ReactNode }) => <td className="border border-zinc-800 px-2 py-1">{children}</td>,
+};
 
-	return <div className="text-xs text-zinc-300 leading-relaxed">{parts}</div>;
+function FormattedText({ text }: { text: string }) {
+	// Strip HTML comments (<!-- ... -->) before rendering
+	const cleaned = useMemo(() => text.replace(/<!--[\s\S]*?-->/g, "").trim(), [text]);
+	return (
+		<div className="text-xs text-zinc-300 leading-relaxed">
+			<Markdown rehypePlugins={[rehypeRaw]} components={mdComponents}>{cleaned}</Markdown>
+		</div>
+	);
 }
 
 const statusConfig: Record<ReviewCommentStatus, { label: string; color: string; bg: string }> = {
@@ -259,10 +272,12 @@ const CommentDisplay = memo(function CommentDisplay({ comment, replies, onResolv
 
 const GitHubCommentDisplay = memo(function GitHubCommentDisplay({
 	comment,
+	linkedReplies,
 	onReply,
 	onResolve,
 }: {
 	comment: GitHubReviewComment;
+	linkedReplies?: ReviewComment[];
 	onReply?: (threadId: string, content: string) => void;
 	onResolve?: (threadId: string) => void;
 }) {
@@ -329,9 +344,37 @@ const GitHubCommentDisplay = memo(function GitHubCommentDisplay({
 								<span className="text-[10px] text-blue-400/70 font-medium">@{reply.author}</span>
 								<span className="text-[10px] text-zinc-600">{new Date(reply.createdAt).toLocaleDateString()}</span>
 							</div>
-							<div className="px-2.5 py-1.5 text-xs text-zinc-300 whitespace-pre-wrap">{reply.body}</div>
+							<div className="px-2.5 py-1.5"><FormattedText text={reply.body} /></div>
 						</div>
 					))}
+				</div>
+			)}
+			{/* Linked local replies (pending/processing/answered from queue) */}
+			{linkedReplies && linkedReplies.length > 0 && (
+				<div className="border-t border-blue-500/10">
+					{linkedReplies.map((lr) => {
+						const rs = statusConfig[lr.status];
+						return (
+							<div key={lr.id} className="border-t border-blue-500/10 first:border-t-0">
+								<div className="flex items-center justify-between px-2.5 py-1 bg-violet-500/5">
+									<span className="text-[10px] text-zinc-500">Your reply</span>
+									<span className={`text-[10px] px-1.5 py-0.5 rounded-full ${rs.bg} ${rs.color}`}>
+										{rs.label}
+										{(lr.status === "processing" || lr.status === "sending") && (
+											<span className="inline-block ml-1 w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+										)}
+									</span>
+								</div>
+								<div className="px-2.5 py-1.5 text-xs text-zinc-300 whitespace-pre-wrap">{lr.content}</div>
+								{lr.response && (
+									<div className="px-2.5 py-1.5 bg-emerald-500/5">
+										<div className="text-[10px] text-emerald-500 mb-1 font-medium">Claude&apos;s response:</div>
+										<FormattedText text={lr.response} />
+									</div>
+								)}
+							</div>
+						);
+					})}
 				</div>
 			)}
 			{/* Reply / input */}
@@ -360,6 +403,7 @@ const GitHubCommentDisplay = memo(function GitHubCommentDisplay({
 interface CommentThreadProps {
 	comments: ReviewComment[];
 	githubComments?: GitHubReviewComment[];
+	ghThreadReplies?: Map<string, ReviewComment[]>;
 	isAddingComment: boolean;
 	onSubmitComment: (content: string) => void;
 	onCancelComment: () => void;
@@ -370,7 +414,7 @@ interface CommentThreadProps {
 	onResolveGitHubThread?: (threadId: string) => void;
 }
 
-export const CommentThread = memo(function CommentThread({ comments, githubComments, isAddingComment, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment, onReplyComment, onReplyGitHubComment, onResolveGitHubThread }: CommentThreadProps) {
+export const CommentThread = memo(function CommentThread({ comments, githubComments, ghThreadReplies, isAddingComment, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment, onReplyComment, onReplyGitHubComment, onResolveGitHubThread }: CommentThreadProps) {
 	// Separate root comments from replies
 	const { roots, repliesByParent } = useMemo(() => {
 		const roots: ReviewComment[] = [];
@@ -393,6 +437,7 @@ export const CommentThread = memo(function CommentThread({ comments, githubComme
 				<GitHubCommentDisplay
 					key={gc.id}
 					comment={gc}
+					linkedReplies={ghThreadReplies?.get(gc.threadId)}
 					onReply={onReplyGitHubComment}
 					onResolve={onResolveGitHubThread}
 				/>

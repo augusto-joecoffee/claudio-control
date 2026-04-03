@@ -312,9 +312,26 @@ const FileDiff = memo(function FileDiff({
 			return hunks;
 		});
 	}, [fetchFileLines]);
-	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath), [comments, filePath]);
+	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath && !c.githubThreadId), [comments, filePath]);
+	// Local comments linked to GitHub threads (pending/processing replies)
+	const ghThreadReplies = useMemo(() => {
+		const map = new Map<string, ReviewComment[]>();
+		for (const c of comments) {
+			if (c.githubThreadId) {
+				const arr = map.get(c.githubThreadId) ?? [];
+				arr.push(c);
+				map.set(c.githubThreadId, arr);
+			}
+		}
+		return map;
+	}, [comments]);
 	const oldPath = file.oldPath;
-	const fileGitHubComments = useMemo(() => (githubComments ?? []).filter((c) => c.path === filePath || c.path === oldPath), [githubComments, filePath, oldPath]);
+	const fileName = filePath.split("/").pop() ?? "";
+	const fileGitHubComments = useMemo(() => (githubComments ?? []).filter((c) => {
+		if (c.path === filePath || c.path === oldPath) return true;
+		// Fall back to filename match for moved/renamed files
+		return fileName !== "" && c.path.endsWith("/" + fileName);
+	}), [githubComments, filePath, oldPath, fileName]);
 	const fileRef = useRef<HTMLDivElement>(null);
 
 	// Build widgets map: changeKey → ReactNode for inline comments
@@ -355,6 +372,7 @@ const FileDiff = memo(function FileDiff({
 					<CommentThread
 						comments={lineComments}
 						githubComments={lineGhComments}
+						ghThreadReplies={ghThreadReplies}
 						isAddingComment={isAdding}
 						onSubmitComment={onSubmitComment}
 						onCancelComment={onCancelComment}
@@ -375,6 +393,7 @@ const FileDiff = memo(function FileDiff({
 				<CommentThread
 					comments={[]}
 					githubComments={ghComments}
+					ghThreadReplies={ghThreadReplies}
 					isAddingComment={false}
 					onSubmitComment={onSubmitComment}
 					onCancelComment={onCancelComment}
