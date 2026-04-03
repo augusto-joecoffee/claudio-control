@@ -63,15 +63,53 @@ export async function analyzeWithTypeScript(
 		const nodeCount = graph.nodes.size;
 		warnings.push(`Graph: ${nodeCount} symbols indexed from project.`);
 
-		// Layer 3: Build call edges (populates graph.edges, graph.inbound, graph.outbound)
-		const { warnings: edgeWarnings } = buildEdges(project, graph, cwd);
-		warnings.push(...edgeWarnings);
-		warnings.push(`Edges: ${graph.edges.length} call edges resolved.`);
-
-		// Layer 1: Anchor diff to AST symbols
+		// Layer 1: Anchor diff to AST symbols (BEFORE edges, so we know the scope)
 		const { anchors, warnings: anchorWarnings } = anchorDiffToSymbols(rawDiff, project, graph, cwd);
 		warnings.push(...anchorWarnings);
 		warnings.push(`Anchors: ${anchors.length} changed symbols found in diff.`);
+
+		// Determine edge-building scope: changed files + files containing entrypoints
+		// + files that import from changed files (1 level).
+		// This avoids running the type checker on thousands of unrelated files.
+		const edgeScope = new Set<string>(changedPaths);
+
+		// Add files with entrypoints (they might call into changed code)
+		for (const [id, node] of graph.nodes) {
+			if (node.entrypointKind) edgeScope.add(node.filePath);
+		}
+
+		// Add files that import from changed files (check import declarations)
+		for (const sf of project.getSourceFiles()) {
+			const absPath = sf.getFilePath();
+			if (absPath.includes("/node_modules/")) continue;
+			const relPath = makeRelative(absPath, cwd);
+			if (relPath.startsWith("/")) continue;
+			if (edgeScope.has(relPath)) continue;
+
+			// Check if this file imports from any changed file
+			try {
+				for (const imp of sf.getImportDeclarations()) {
+					const moduleSpecifier = imp.getModuleSpecifierValue();
+					if (!moduleSpecifier) continue;
+					// Check if the import resolves to a changed file
+					for (const changed of changedPaths) {
+						const changedBase = changed.replace(/\.\w+$/, "");
+						if (moduleSpecifier.includes(changedBase.split("/").pop() ?? "___")) {
+							edgeScope.add(relPath);
+							break;
+						}
+					}
+					if (edgeScope.has(relPath)) break;
+				}
+			} catch { /* skip */ }
+		}
+
+		warnings.push(`Edge scope: ${edgeScope.size} files (of ${project.getSourceFiles().length} total).`);
+
+		// Layer 3: Build call edges ONLY for the scoped files
+		const { warnings: edgeWarnings, edgeCount } = buildEdges(project, graph, cwd, edgeScope);
+		warnings.push(...edgeWarnings);
+		warnings.push(`Edges: ${edgeCount} call edges resolved.`);
 
 		if (anchors.length === 0) {
 			return emptyResult(sessionId, diffFingerprint, start, [
@@ -189,6 +227,12 @@ function detectLang(filePath: string): string {
 		mjs: "javascript", cjs: "javascript",
 	};
 	return map[ext] ?? "text";
+}
+
+function makeRelative(absPath: string, cwd: string): string {
+	const cwdNormalized = cwd.endsWith("/") ? cwd : cwd + "/";
+	if (absPath.startsWith(cwdNormalized)) return absPath.slice(cwdNormalized.length);
+	return absPath;
 }
 
 function emptyResult(

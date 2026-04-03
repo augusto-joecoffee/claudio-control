@@ -19,35 +19,47 @@ import { makeSymbolId, addEdge } from "./graph-types";
 
 /**
  * Populate call edges in the semantic graph using the type checker.
- * Should be called after symbol-index has populated all nodes.
+ *
+ * IMPORTANT: Only processes nodes in the specified file scope to avoid
+ * running the type checker on thousands of files. Pass in changed files
+ * + their import neighbors for good coverage without full-project cost.
+ *
+ * If no scope is provided, processes ALL nodes (expensive, avoid on large projects).
  */
 export function buildEdges(
 	project: Project,
 	graph: SemanticCodeGraph,
 	cwd: string,
-): { warnings: string[] } {
+	scopeFilePaths?: Set<string>,
+): { warnings: string[]; edgeCount: number } {
 	const warnings: string[] = [];
 
-	// Clear existing edges (in case of re-index)
+	// Clear existing edges
 	graph.edges = [];
 	graph.inbound = new Map();
 	graph.outbound = new Map();
 
+	let processed = 0;
 	for (const [fromId, fromNode] of graph.nodes) {
 		// Skip types and exports — they don't make calls
 		if (fromNode.kind === "type" || fromNode.kind === "export") continue;
+
+		// If scope is specified, only process nodes in those files
+		if (scopeFilePaths && !scopeFilePaths.has(fromNode.filePath)) continue;
 
 		try {
 			const callEdges = resolveNodeCalls(fromNode, graph, cwd);
 			for (const edge of callEdges) {
 				addEdge(graph, edge);
 			}
+			processed++;
 		} catch (e) {
 			warnings.push(`Edge resolution failed for ${fromNode.qualifiedName}: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
-	return { warnings };
+	warnings.push(`Processed ${processed} nodes for edge resolution.`);
+	return { warnings, edgeCount: graph.edges.length };
 }
 
 /**
