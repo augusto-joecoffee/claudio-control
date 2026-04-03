@@ -269,16 +269,16 @@ export function SessionCard({
             <StatusBadge status={displayStatus} orphaned={session.orphaned} />
           </div>
 
+          {/* Git info + PR status — always visible */}
+          {(session.git || prStatus) && (
+            <div className="mb-3 flex items-center gap-2 flex-wrap">
+              {session.git && <GitSummary git={session.git} hideBranch={collapsed} />}
+              {prStatus && <PrStatusBadge pr={prStatus} />}
+            </div>
+          )}
+
           {!collapsed && (
             <>
-              {/* Git info + PR status */}
-              {(session.git || prStatus) && (
-                <div className="mb-3 flex items-center gap-2 flex-wrap">
-                  {session.git && <GitSummary git={session.git} />}
-                  {prStatus && <PrStatusBadge pr={prStatus} />}
-                </div>
-              )}
-
               {/* Divider */}
               <div className="h-px bg-white/4 mb-3" />
 
