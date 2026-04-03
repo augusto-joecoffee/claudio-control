@@ -205,49 +205,60 @@ body {
   transform: translateX(-50%) scale(1);
 }
 
-/* react-diff-view dark theme overrides */
+/* react-diff-view dark theme — GitHub dark mode exact */
 .diff-viewer-container .diff {
   font-family: var(--font-geist-mono), monospace;
   font-size: 12px;
-  line-height: 1.5;
-  color: #d4d4d8;
-  background: #0a0a0f;
+  line-height: 20px;
+  color: #c9d1d9;
+  background: #0d1117;
+}
+.diff-viewer-container .diff td {
+  border-top: 1px solid rgba(255, 255, 255, 0.008);
 }
 .diff-viewer-container .diff-gutter {
-  background: #0f0f14;
-  color: #52525b;
-  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  background: #0d1117;
+  color: #484f58;
+  border-right: 1px solid #21262d;
   cursor: pointer;
   user-select: none;
   min-width: 40px;
-  padding: 0 6px;
+  padding: 0 8px;
   text-align: right;
 }
 .diff-viewer-container .diff-gutter:hover {
-  background: rgba(139, 92, 246, 0.1);
-  color: #a78bfa;
+  background: rgba(56, 139, 253, 0.1);
+  color: #58a6ff;
 }
 .diff-viewer-container .diff-code {
-  background: #0a0a0f;
-  padding-left: 12px;
+  background: #0d1117;
+  padding-left: 16px;
 }
 .diff-viewer-container .diff-code-insert {
-  background: rgba(34, 197, 94, 0.06);
+  background: rgba(46, 160, 67, 0.15);
 }
 .diff-viewer-container .diff-code-delete {
-  background: rgba(239, 68, 68, 0.06);
+  background: rgba(248, 81, 73, 0.15);
+}
+.diff-viewer-container .diff-code-insert .diff-code-edit {
+  background: rgba(46, 160, 67, 0.4);
+}
+.diff-viewer-container .diff-code-delete .diff-code-edit {
+  background: rgba(248, 81, 73, 0.4);
 }
 .diff-viewer-container .diff-gutter-insert {
-  background: rgba(34, 197, 94, 0.1);
-  color: #4ade80;
+  background: rgba(46, 160, 67, 0.2);
+  color: #3fb950;
+  border-color: #1b3826;
 }
 .diff-viewer-container .diff-gutter-delete {
-  background: rgba(239, 68, 68, 0.1);
-  color: #f87171;
+  background: rgba(248, 81, 73, 0.2);
+  color: #f85149;
+  border-color: #3c1e20;
 }
 .diff-viewer-container .diff-gutter-omit,
 .diff-viewer-container .diff-code-omit {
-  background: #0a0a0f;
+  background: #0d1117;
   border-right: none;
 }
 .diff-viewer-container .diff-widget {

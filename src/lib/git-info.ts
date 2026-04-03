@@ -10,6 +10,8 @@ async function gitCommand(args: string[], cwd: string): Promise<string> {
     const { stdout } = await execFileAsync("git", args, {
       cwd,
       timeout: GIT_TIMEOUT_MS,
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     });
     return stdout.trim();
   } catch {
@@ -131,26 +133,82 @@ export interface WorktreeInfo {
   isMain: boolean;
 }
 
+/**
+ * List all worktrees by reading the filesystem directly — no git process.
+ * Reads .git/worktrees/<name>/gitdir for each worktree path,
+ * and .git/worktrees/<name>/HEAD for the branch.
+ */
 export async function getAllWorktrees(cwd: string): Promise<WorktreeInfo[]> {
-  const output = await gitCommand(["worktree", "list", "--porcelain"], cwd);
-  if (!output) return [];
+  const { readdir, readFile, stat: fsStat } = await import("fs/promises");
+  const { join, dirname } = await import("path");
 
-  const worktrees: WorktreeInfo[] = [];
-  const blocks = output.split("\n\n");
-  let isFirst = true;
-
-  for (const block of blocks) {
-    const pathMatch = block.match(/^worktree (.+)$/m);
-    if (!pathMatch) continue;
-
-    const branchMatch = block.match(/^branch refs\/heads\/(.+)$/m);
-    worktrees.push({
-      path: pathMatch[1],
-      branch: branchMatch ? branchMatch[1] : null,
-      isMain: isFirst,
-    });
-    isFirst = false;
+  // Find the .git directory (cwd might be a worktree itself)
+  let gitDir: string;
+  const dotGit = join(cwd, ".git");
+  try {
+    const s = await fsStat(dotGit);
+    if (s.isDirectory()) {
+      gitDir = dotGit;
+    } else {
+      // .git is a file → this is a worktree, read the real gitdir
+      const content = (await readFile(dotGit, "utf-8")).trim();
+      const match = content.match(/^gitdir:\s*(.+)$/);
+      if (!match) return [];
+      // The gitdir points to .git/worktrees/<name> in the main repo
+      const worktreeGitDir = match[1].startsWith("/") ? match[1] : join(cwd, match[1]);
+      // Go up two levels: .git/worktrees/<name> → .git
+      gitDir = dirname(dirname(worktreeGitDir));
+    }
+  } catch {
+    return [];
   }
+
+  // The main repo is the parent of .git
+  const mainRepoPath = dirname(gitDir);
+
+  // Read the main repo's branch from .git/HEAD
+  let mainBranch: string | null = null;
+  try {
+    const head = (await readFile(join(gitDir, "HEAD"), "utf-8")).trim();
+    const m = head.match(/^ref: refs\/heads\/(.+)$/);
+    mainBranch = m ? m[1] : null;
+  } catch { /* detached HEAD or missing */ }
+
+  const worktrees: WorktreeInfo[] = [
+    { path: mainRepoPath, branch: mainBranch, isMain: true },
+  ];
+
+  // Read .git/worktrees/ for non-main worktrees
+  const worktreesDir = join(gitDir, "worktrees");
+  let entries: string[];
+  try {
+    entries = await readdir(worktreesDir);
+  } catch {
+    return worktrees; // No worktrees directory — just the main repo
+  }
+
+  await Promise.all(entries.map(async (name) => {
+    const wtDir = join(worktreesDir, name);
+    try {
+      const s = await fsStat(wtDir);
+      if (!s.isDirectory()) return;
+
+      // Read gitdir file to get the worktree path
+      const gitdirContent = (await readFile(join(wtDir, "gitdir"), "utf-8")).trim();
+      // gitdir points to <worktree>/.git — parent is the worktree path
+      const wtPath = dirname(gitdirContent);
+
+      // Read HEAD for the branch
+      let branch: string | null = null;
+      try {
+        const head = (await readFile(join(wtDir, "HEAD"), "utf-8")).trim();
+        const m = head.match(/^ref: refs\/heads\/(.+)$/);
+        branch = m ? m[1] : null;
+      } catch { /* detached HEAD */ }
+
+      worktrees.push({ path: wtPath, branch, isMain: false });
+    } catch { /* skip broken entries */ }
+  }));
 
   return worktrees;
 }

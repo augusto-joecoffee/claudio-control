@@ -322,7 +322,7 @@ const FileDiff = memo(function FileDiff({
 	return (
 		<div ref={fileRef} id={`file-${filePath}`} className="mb-4 mx-4 first:mt-3">
 			{/* File header */}
-			<div className="sticky top-0 z-20 px-3 py-1.5 bg-[#0a0a0f] border border-zinc-800/50 rounded-t-lg flex items-center gap-2">
+			<div className="sticky top-0 z-20 px-3 py-1.5 bg-[#161b22] border border-[#21262d] rounded-t-lg flex items-center gap-2">
 				<span
 					className={`text-[10px] font-bold shrink-0 ${
 						file.type === "add" ? "text-emerald-400" : file.type === "delete" ? "text-red-400" : "text-amber-400"
@@ -360,7 +360,7 @@ const FileDiff = memo(function FileDiff({
 			</div>
 
 			{/* Diff content — collapse when viewed */}
-			{!isViewed && <div className="border border-t-0 border-zinc-800/50 rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }}>
+			{!isViewed && <div className="border border-t-0 border-[#21262d] rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }}>
 				{expandedHunks.length > 0 ? (
 					<Diff
 						viewType={viewType}
@@ -405,31 +405,29 @@ const FileDiff = memo(function FileDiff({
 								return [
 									...(showHeader ? [
 										<Decoration key={`decoration-${hunk.content}`}>
-											<div className="px-3 py-0.5 bg-blue-500/5 text-[10px] text-blue-400 font-mono border-y border-blue-500/10 flex items-center justify-between">
-												<span>{hunk.content}</span>
+											<div
+												onClick={() => canExpandUp && expandUp(hunkIdx)}
+												className={`px-0 bg-[rgba(56,139,253,0.15)] text-[10px] font-mono flex items-center h-[14px] border-t border-b border-[rgba(56,139,253,0.1)] ${canExpandUp ? "cursor-pointer hover:bg-[rgba(56,139,253,0.25)]" : ""} transition-colors`}
+											>
 												{canExpandUp && (
-													<button
-														onClick={() => expandUp(hunkIdx)}
-														className="text-zinc-500 hover:text-blue-400 transition-colors px-1"
-														title={`Show ${EXPAND_STEP} more lines above`}
-													>
-														↑ Expand
-													</button>
+													<span className="flex flex-col items-center justify-center w-[40px] shrink-0 h-full text-[#58a6ff] border-r border-[rgba(56,139,253,0.1)]">
+														<svg className="w-2 h-2" viewBox="0 0 16 16" fill="currentColor"><path d="M12.78 6.22a.75.75 0 01-1.06 1.06L8 3.56 4.28 7.28a.75.75 0 01-1.06-1.06l4.25-4.25a.75.75 0 011.06 0l4.25 4.25z" /><path d="M12.78 11.22a.75.75 0 01-1.06 1.06L8 8.56l-3.72 3.72a.75.75 0 01-1.06-1.06l4.25-4.25a.75.75 0 011.06 0l4.25 4.25z" /></svg>
+													</span>
 												)}
+												<span className="text-[rgba(139,186,255,0.7)] px-3 text-[9px] leading-none truncate">{hunk.content}</span>
 											</div>
 										</Decoration>,
 									] : []),
 									<Hunk key={hunk.content} hunk={hunk} />,
 									...(canExpandDown ? [
 										<Decoration key={`expand-down-${hunk.content}`}>
-											<div className="flex justify-center py-0.5 bg-blue-500/5 border-y border-blue-500/10">
-												<button
-													onClick={() => expandDown(hunkIdx)}
-													className="text-[10px] text-zinc-500 hover:text-blue-400 transition-colors px-2"
-													title={`Show ${EXPAND_STEP} more lines below`}
-												>
-													↓ Expand
-												</button>
+											<div
+												onClick={() => expandDown(hunkIdx)}
+												className="flex bg-[rgba(56,139,253,0.15)] h-[14px] border-t border-b border-[rgba(56,139,253,0.1)] cursor-pointer hover:bg-[rgba(56,139,253,0.25)] transition-colors"
+											>
+												<span className="flex items-center justify-center w-[40px] shrink-0 h-full text-[#58a6ff] border-r border-[rgba(56,139,253,0.1)]">
+													<svg className="w-2 h-2" viewBox="0 0 16 16" fill="currentColor"><path d="M3.22 4.78a.75.75 0 011.06-1.06L8 7.44l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L3.22 4.78z" /><path d="M3.22 9.78a.75.75 0 011.06-1.06L8 12.44l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L3.22 9.78z" /></svg>
+												</span>
 											</div>
 										</Decoration>,
 									] : []),

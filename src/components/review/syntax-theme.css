@@ -1,169 +1,91 @@
 /*
- * Syntax highlighting for diff view — GitHub dark-mode at ~90%.
- *
- * Based on GitHub's Primer dark palette, nearly full saturation.
- * On green/red diff backgrounds the palette desaturates so the
- * diff signal stays dominant.
+ * Syntax highlighting — GitHub dark mode (Primer) exact.
+ * Full saturation everywhere, including insert/delete lines.
+ * GitHub's subtle green/red backgrounds don't clash with vivid syntax colors.
  */
 
-/* -- Base text: light gray close to GitHub's #c9d1d9 -- */
+/* -- Base text color override (matches globals.css .diff color) -- */
 .diff-viewer-container .diff-code {
-	color: #c0c8d0;
+	color: #c9d1d9;
 }
 
-/* -- Keywords & control flow (GitHub: #ff7b72) -- */
+/* -- Keywords & control flow (#ff7b72) -- */
 .diff-viewer-container .token.keyword,
 .diff-viewer-container .token.builtin,
 .diff-viewer-container .token.important {
-	color: #f08070;
+	color: #ff7b72;
 }
 
-/* -- HTML/JSX tags (GitHub: #7ee787) -- */
+/* -- HTML/JSX tags (#7ee787) -- */
 .diff-viewer-container .token.tag {
-	color: #72d880;
+	color: #7ee787;
 }
 
-/* -- Strings & template literals (GitHub: #a5d6ff) -- */
+/* -- Strings & template literals (#a5d6ff) -- */
 .diff-viewer-container .token.string,
 .diff-viewer-container .token.template-string,
 .diff-viewer-container .token.char,
 .diff-viewer-container .token.attr-value {
-	color: #98ccf8;
+	color: #a5d6ff;
 }
 
-/* -- Comments & docstrings (GitHub: #8b949e) -- */
+/* -- Comments (#8b949e) -- */
 .diff-viewer-container .token.comment,
 .diff-viewer-container .token.prolog,
 .diff-viewer-container .token.doctype,
 .diff-viewer-container .token.cdata {
-	color: #828a94;
+	color: #8b949e;
 	font-style: italic;
 }
 
-/* -- Numbers & booleans (GitHub: #79c0ff) -- */
+/* -- Numbers & booleans (#79c0ff) -- */
 .diff-viewer-container .token.number,
 .diff-viewer-container .token.boolean {
-	color: #70b8f8;
+	color: #79c0ff;
 }
 
-/* -- Functions & methods (GitHub: #d2a8ff) -- */
+/* -- Functions & methods (#d2a8ff) -- */
 .diff-viewer-container .token.function,
 .diff-viewer-container .token.class-name {
-	color: #c8a0f0;
+	color: #d2a8ff;
 }
 
-/* -- Operators (GitHub: #ff7b72) -- */
+/* -- Operators (#ff7b72) -- */
 .diff-viewer-container .token.operator {
-	color: #f08070;
+	color: #ff7b72;
 }
 
-/* -- Punctuation -- */
+/* -- Punctuation (#c9d1d9) -- */
 .diff-viewer-container .token.punctuation {
-	color: #a0a8b4;
+	color: #c9d1d9;
 }
 
-/* -- Attribute names (GitHub: #79c0ff) -- */
+/* -- Attribute names (#79c0ff) -- */
 .diff-viewer-container .token.attr-name {
-	color: #70b8f8;
+	color: #79c0ff;
 }
 
-/* -- Regex & URLs (GitHub: #7ee787) -- */
+/* -- Regex & URLs (#7ee787) -- */
 .diff-viewer-container .token.regex,
 .diff-viewer-container .token.url {
-	color: #72d880;
+	color: #7ee787;
 }
 
-/* -- Type annotations & constants (GitHub: #79c0ff) -- */
+/* -- Types, constants, symbols (#79c0ff) -- */
 .diff-viewer-container .token.type,
 .diff-viewer-container .token.constant,
 .diff-viewer-container .token.symbol {
-	color: #70b8f8;
+	color: #79c0ff;
 }
 
-/* -- Variables & properties -- */
+/* -- Variables & properties (inherit base) -- */
 .diff-viewer-container .token.variable,
 .diff-viewer-container .token.property {
 	color: inherit;
 }
 
-/* ============================================================
-   Inserted lines — ~60% saturation, green-shifted
-   ============================================================ */
-.diff-viewer-container .diff-code-insert {
-	color: #94a894;
-}
-
-.diff-viewer-container .diff-code-insert .token.keyword,
-.diff-viewer-container .diff-code-insert .token.builtin,
-.diff-viewer-container .diff-code-insert .token.important,
-.diff-viewer-container .diff-code-insert .token.operator {
-	color: #cc9078;
-}
-
-.diff-viewer-container .diff-code-insert .token.string,
-.diff-viewer-container .diff-code-insert .token.template-string,
-.diff-viewer-container .diff-code-insert .token.attr-value {
-	color: #80acc0;
-}
-
-.diff-viewer-container .diff-code-insert .token.function,
-.diff-viewer-container .diff-code-insert .token.class-name {
-	color: #a898c0;
-}
-
-.diff-viewer-container .diff-code-insert .token.comment {
-	color: #6c806c;
-	font-style: italic;
-}
-
-.diff-viewer-container .diff-code-insert .token.number,
-.diff-viewer-container .diff-code-insert .token.boolean,
-.diff-viewer-container .diff-code-insert .token.type,
-.diff-viewer-container .diff-code-insert .token.constant {
-	color: #78a4b0;
-}
-
-.diff-viewer-container .diff-code-insert .token.punctuation {
-	color: #8c9c8c;
-}
-
-/* ============================================================
-   Deleted lines — ~60% saturation, red-shifted
-   ============================================================ */
-.diff-viewer-container .diff-code-delete {
-	color: #ac9494;
-}
-
-.diff-viewer-container .diff-code-delete .token.keyword,
-.diff-viewer-container .diff-code-delete .token.builtin,
-.diff-viewer-container .diff-code-delete .token.important,
-.diff-viewer-container .diff-code-delete .token.operator {
-	color: #cc8478;
-}
-
-.diff-viewer-container .diff-code-delete .token.string,
-.diff-viewer-container .diff-code-delete .token.template-string,
-.diff-viewer-container .diff-code-delete .token.attr-value {
-	color: #889cb8;
-}
-
-.diff-viewer-container .diff-code-delete .token.function,
-.diff-viewer-container .diff-code-delete .token.class-name {
-	color: #a890b8;
-}
-
-.diff-viewer-container .diff-code-delete .token.comment {
-	color: #7c6c6c;
-	font-style: italic;
-}
-
-.diff-viewer-container .diff-code-delete .token.number,
-.diff-viewer-container .diff-code-delete .token.boolean,
-.diff-viewer-container .diff-code-delete .token.type,
-.diff-viewer-container .diff-code-delete .token.constant {
-	color: #8894a8;
-}
-
-.diff-viewer-container .diff-code-delete .token.punctuation {
-	color: #9c8c8c;
-}
+/*
+ * Insert/delete lines: GitHub keeps full syntax colors.
+ * The backgrounds are subtle enough (15% opacity) that vivid
+ * syntax doesn't clash. No desaturation needed.
+ */

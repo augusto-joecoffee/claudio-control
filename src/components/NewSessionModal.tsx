@@ -546,35 +546,24 @@ export function NewSessionModal({ repoPath, repoName, onClose, onCreated, onInli
           {/* Existing worktree picker */}
           {!needsSetup && !worktreesLoading && worktrees.filter((w) => !w.isMain).length > 0 && (
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">Existing worktrees</label>
-              <div className="flex flex-wrap gap-1.5 mb-1">
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">Existing worktree</label>
+              <select
+                value={selectedWorktree}
+                onChange={(e) => {
+                  setSelectedWorktree(e.target.value);
+                  if (e.target.value) setBranchName("");
+                }}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 focus:outline-hidden focus:border-zinc-600 transition-colors appearance-none cursor-pointer"
+              >
+                <option value="">None — create new or use main</option>
                 {worktrees
                   .filter((w) => !w.isMain)
                   .map((w) => (
-                    <button
-                      key={w.path}
-                      type="button"
-                      onClick={() => {
-                        if (selectedWorktree === w.path) {
-                          setSelectedWorktree("");
-                        } else {
-                          setSelectedWorktree(w.path);
-                          setBranchName("");
-                        }
-                      }}
-                      className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
-                        selectedWorktree === w.path
-                          ? "bg-blue-500/20 border-blue-500/40 text-blue-300 border"
-                          : "bg-white/4 border border-white/7 text-zinc-400 hover:text-zinc-200 hover:border-white/15"
-                      }`}
-                    >
+                    <option key={w.path} value={w.path}>
                       {w.branch || w.path.split("/").pop()}
-                    </button>
+                    </option>
                   ))}
-              </div>
-              <p className="text-[11px] text-zinc-600 mt-1">
-                Select an existing worktree, or create a new one below.
-              </p>
+              </select>
             </div>
           )}
 
