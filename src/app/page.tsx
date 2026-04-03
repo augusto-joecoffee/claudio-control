@@ -100,6 +100,26 @@ export default function Dashboard() {
 
   const handleSessionKilled = useCallback((sessionId: string) => {
     setKilledSessionIds((prev) => ({ ...prev, [sessionId]: Date.now() }));
+    // Clean up any inline terminal associated with this session
+    let killedDir: string | null = null;
+    setTerminals((prev) => {
+      for (const [d, entry] of prev) {
+        if (entry.sessionId === sessionId) {
+          killedDir = d;
+          if (entry.ptyId != null) {
+            const api = (window as unknown as { electronAPI?: { ptyKill: (id: number, killTmuxSession?: boolean) => Promise<void> } }).electronAPI;
+            api?.ptyKill(entry.ptyId, true).catch(() => {});
+          }
+          const next = new Map(prev);
+          next.delete(d);
+          return next;
+        }
+      }
+      return prev;
+    });
+    if (killedDir) {
+      setActiveTerminalDir((prev) => (prev === killedDir ? null : prev));
+    }
   }, []);
 
   const handleViewModeChange = useCallback((mode: ViewMode) => {
