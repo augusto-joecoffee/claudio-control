@@ -11,6 +11,7 @@ import { useReviewCommits } from "@/hooks/useReviewCommits";
 import { useReviewBranches } from "@/hooks/useReviewBranches";
 import { useViewedFiles } from "@/hooks/useViewedFiles";
 import { useAutoRefreshDiff } from "@/hooks/useAutoRefreshDiff";
+import { useGitHubComments } from "@/hooks/useGitHubComments";
 import { DiffViewer, parseDiff, getFilePath } from "@/components/review/DiffViewer";
 import { FileTree } from "@/components/review/FileTree";
 import { CommentQueue } from "@/components/review/CommentQueue";
@@ -47,12 +48,15 @@ export default function ReviewPage() {
 	const { commits } = useReviewCommits(sessionId);
 	const { branches } = useReviewBranches(sessionId);
 
+	const { comments: githubComments, refresh: refreshGitHubComments, replyToThread, resolveThread } = useGitHubComments(sessionId, review?.prUrl);
+
 	const [paused, setPaused] = useState(false);
 	const [viewType, setViewType] = useState<ViewType>("split");
 	const [selectedFile, setSelectedFile] = useState<string | null>(null);
 	const [activeComment, setActiveComment] = useState<{ filePath: string; startLine: number; endLine: number } | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
+	const [showGitHubComments, setShowGitHubComments] = useState(true);
 
 	const pendingSnippetRef = useRef("");
 
@@ -102,6 +106,8 @@ export default function ReviewPage() {
 		return counts;
 	}, [comments]);
 
+	const githubCommentFiles = useMemo(() => new Set(githubComments.map((c) => c.path)), [githubComments]);
+
 	const handleGutterClick = useCallback((filePath: string, startLine: number, endLine: number, anchorSnippet: string) => {
 		setActiveComment((prev) => {
 			if (prev?.filePath === filePath && prev?.startLine === startLine && prev?.endLine === endLine) return null;
@@ -135,6 +141,26 @@ export default function ReviewPage() {
 			refreshQueue();
 		},
 		[comments, addComment, refreshQueue],
+	);
+
+	const handleReplyGitHubComment = useCallback(
+		async (threadId: string, content: string) => {
+			// Find the GitHub comment to get file/line context
+			const ghComment = githubComments.find((c) => c.threadId === threadId);
+			if (!ghComment) return;
+			// Create a local comment linked to the GitHub thread — goes through the queue
+			await addComment(ghComment.path, ghComment.line, content, "", undefined, undefined, threadId);
+			refreshQueue();
+		},
+		[githubComments, addComment, refreshQueue],
+	);
+
+	const handleResolveGitHubThread = useCallback(
+		async (threadId: string) => {
+			await resolveThread(threadId);
+			refreshGitHubComments();
+		},
+		[resolveThread, refreshGitHubComments],
 	);
 
 	const handleCommentAction = useCallback(
@@ -216,6 +242,10 @@ export default function ReviewPage() {
 				commits={commits}
 				selectedCommit={selectedCommit}
 				onSelectCommit={handleSelectCommit}
+				hasPrComments={githubComments.length > 0}
+				showGitHubComments={showGitHubComments}
+				onToggleGitHubComments={() => setShowGitHubComments((v) => !v)}
+				gitHubCommentCount={githubComments.length}
 			/>
 
 			{/* Main content */}
@@ -235,6 +265,7 @@ export default function ReviewPage() {
 							totalFiles={files.length}
 							uncommittedFiles={uncommittedSet}
 							isLoading={diffLoading}
+							githubCommentFiles={showGitHubComments ? githubCommentFiles : undefined}
 						/>
 					</div>
 				) : (
@@ -254,6 +285,7 @@ export default function ReviewPage() {
 					rawDiff={diff}
 					viewType={viewType}
 					comments={comments}
+					githubComments={showGitHubComments ? githubComments : undefined}
 					activeCommentLocation={activeComment}
 					onGutterClick={handleGutterClick}
 					onSubmitComment={handleSubmitComment}
@@ -261,6 +293,8 @@ export default function ReviewPage() {
 					onResolveComment={handleResolveComment}
 					onDeleteComment={handleDeleteComment}
 					onReplyComment={handleReplyComment}
+					onReplyGitHubComment={handleReplyGitHubComment}
+					onResolveGitHubThread={handleResolveGitHubThread}
 					selectedFile={selectedFile}
 					isViewed={isViewed}
 					onToggleViewed={toggleViewed}

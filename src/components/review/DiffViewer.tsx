@@ -12,7 +12,7 @@ const refractor = {
 	highlight: (code: string, language: string) => _refractor.highlight(code, language).children,
 	registered: (lang: string) => _refractor.registered(lang),
 };
-import type { ReviewComment } from "@/lib/types";
+import type { GitHubReviewComment, ReviewComment } from "@/lib/types";
 import { CommentThread } from "./CommentThread";
 import "react-diff-view/style/index.css";
 import "./syntax-theme.css";
@@ -28,6 +28,9 @@ interface DiffViewerProps {
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
 	onReplyComment?: (parentId: string, content: string) => void;
+	githubComments?: GitHubReviewComment[];
+	onReplyGitHubComment?: (threadId: string, content: string) => void;
+	onResolveGitHubThread?: (threadId: string) => void;
 	selectedFile: string | null;
 	isViewed?: (path: string) => boolean;
 	onToggleViewed?: (path: string) => void;
@@ -134,6 +137,36 @@ function findChangeIndexByNewLine(hunks: HunkData[], line: number): { hunk: Hunk
 	return null;
 }
 
+/** Find a change by line number, trying new side first, then old side, then nearest. */
+function findChangeByAnyLine(hunks: HunkData[], line: number): { hunk: HunkData; index: number } | null {
+	// Try exact match on new side
+	const byNew = findChangeIndexByNewLine(hunks, line);
+	if (byNew) return byNew;
+	// Try exact match on old side
+	for (const hunk of hunks) {
+		for (let i = 0; i < hunk.changes.length; i++) {
+			const change = hunk.changes[i];
+			const oldLine = change.type === "normal" ? change.oldLineNumber : change.type === "delete" ? change.lineNumber : null;
+			if (oldLine === line) {
+				return { hunk, index: i };
+			}
+		}
+	}
+	// Fall back to nearest change by new-side line number
+	let best: { hunk: HunkData; index: number; dist: number } | null = null;
+	for (const hunk of hunks) {
+		for (let i = 0; i < hunk.changes.length; i++) {
+			const change = hunk.changes[i];
+			const newLine = change.type === "normal" ? change.newLineNumber : change.type === "insert" ? change.lineNumber : null;
+			if (newLine !== null) {
+				const dist = Math.abs(newLine - line);
+				if (!best || dist < best.dist) best = { hunk, index: i, dist };
+			}
+		}
+	}
+	return best ? { hunk: best.hunk, index: best.index } : null;
+}
+
 /** Build "normal" change entries from raw file lines for expanding context.
  *  `newStart` is the 1-based line in the new file (used for content + newLineNumber).
  *  `oldStart` is the 1-based line on the old side (may differ due to insertions/deletions). */
@@ -161,6 +194,7 @@ const FileDiff = memo(function FileDiff({
 	file,
 	viewType,
 	comments,
+	githubComments,
 	activeCommentLocation,
 	onGutterClick,
 	onSubmitComment,
@@ -168,6 +202,8 @@ const FileDiff = memo(function FileDiff({
 	onResolveComment,
 	onDeleteComment,
 	onReplyComment,
+	onReplyGitHubComment,
+	onResolveGitHubThread,
 	isViewed,
 	onToggleViewed,
 	sessionId,
@@ -176,6 +212,7 @@ const FileDiff = memo(function FileDiff({
 	file: FileData;
 	viewType: ViewType;
 	comments: ReviewComment[];
+	githubComments?: GitHubReviewComment[];
 	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
 	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
@@ -183,6 +220,8 @@ const FileDiff = memo(function FileDiff({
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
 	onReplyComment?: (parentId: string, content: string) => void;
+	onReplyGitHubComment?: (threadId: string, content: string) => void;
+	onResolveGitHubThread?: (threadId: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
@@ -274,13 +313,15 @@ const FileDiff = memo(function FileDiff({
 		});
 	}, [fetchFileLines]);
 	const fileComments = useMemo(() => comments.filter((c) => c.filePath === filePath), [comments, filePath]);
+	const oldPath = file.oldPath;
+	const fileGitHubComments = useMemo(() => (githubComments ?? []).filter((c) => c.path === filePath || c.path === oldPath), [githubComments, filePath, oldPath]);
 	const fileRef = useRef<HTMLDivElement>(null);
 
 	// Build widgets map: changeKey → ReactNode for inline comments
 	const widgets = useMemo(() => {
 		const w: Record<string, React.ReactNode> = {};
 
-		// Group comments by their widget line (endLine for ranges, line for single-line)
+		// Group local comments by their widget line (endLine for ranges, line for single-line)
 		const commentsByWidgetLine = new Map<number, ReviewComment[]>();
 		for (const c of fileComments) {
 			const widgetLine = c.endLine ?? c.line;
@@ -289,30 +330,67 @@ const FileDiff = memo(function FileDiff({
 			commentsByWidgetLine.set(widgetLine, existing);
 		}
 
-		// For each widget line, find the corresponding change and add a widget
+		// Map change keys to GitHub comments (search by new or old line)
+		const ghByKey = new Map<string, GitHubReviewComment[]>();
+		for (const gc of fileGitHubComments) {
+			const result = findChangeByAnyLine(expandedHunks, gc.line);
+			if (result) {
+				const key = getChangeKey(result.hunk.changes[result.index]);
+				const existing = ghByKey.get(key) ?? [];
+				existing.push(gc);
+				ghByKey.set(key, existing);
+			}
+		}
+
+		// Build widgets for local comments
+		const usedKeys = new Set<string>();
 		for (const [widgetLine, lineComments] of commentsByWidgetLine) {
 			const result = findChangeIndexByNewLine(expandedHunks, widgetLine);
 			if (result) {
 				const key = getChangeKey(result.hunk.changes[result.index]);
+				usedKeys.add(key);
+				const lineGhComments = ghByKey.get(key);
 				const isAdding = activeCommentLocation?.filePath === filePath && activeCommentLocation?.endLine === widgetLine;
 				w[key] = (
 					<CommentThread
 						comments={lineComments}
+						githubComments={lineGhComments}
 						isAddingComment={isAdding}
 						onSubmitComment={onSubmitComment}
 						onCancelComment={onCancelComment}
 						onResolveComment={onResolveComment}
 						onDeleteComment={onDeleteComment}
 						onReplyComment={onReplyComment}
+						onReplyGitHubComment={onReplyGitHubComment}
+						onResolveGitHubThread={onResolveGitHubThread}
 					/>
 				);
 			}
 		}
 
+		// Build widgets for GitHub-only comments (no local comments on same line)
+		for (const [key, ghComments] of ghByKey) {
+			if (usedKeys.has(key)) continue;
+			w[key] = (
+				<CommentThread
+					comments={[]}
+					githubComments={ghComments}
+					isAddingComment={false}
+					onSubmitComment={onSubmitComment}
+					onCancelComment={onCancelComment}
+					onReplyGitHubComment={onReplyGitHubComment}
+					onResolveGitHubThread={onResolveGitHubThread}
+				/>
+			);
+		}
+
 		// Handle the case where we're adding a new comment on a line that has no comments yet
 		if (activeCommentLocation?.filePath === filePath) {
 			const widgetLine = activeCommentLocation.endLine;
-			const hasExistingWidget = fileComments.some((c) => (c.endLine ?? c.line) === widgetLine);
+			const hasExistingWidget = commentsByWidgetLine.has(widgetLine) || (() => {
+				const r = findChangeIndexByNewLine(expandedHunks, widgetLine);
+				return r ? usedKeys.has(getChangeKey(r.hunk.changes[r.index])) || ghByKey.has(getChangeKey(r.hunk.changes[r.index])) : false;
+			})();
 			if (!hasExistingWidget) {
 				const result = findChangeIndexByNewLine(expandedHunks, widgetLine);
 				if (result) {
@@ -330,7 +408,7 @@ const FileDiff = memo(function FileDiff({
 		}
 
 		return w;
-	}, [fileComments, activeCommentLocation, filePath, expandedHunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment, onReplyComment]);
+	}, [fileComments, fileGitHubComments, activeCommentLocation, filePath, expandedHunks, onSubmitComment, onCancelComment, onResolveComment, onDeleteComment, onReplyComment, onReplyGitHubComment, onResolveGitHubThread]);
 
 	const handleLineClick = useCallback(
 		(newLine: number, shiftKey: boolean) => {
@@ -531,6 +609,7 @@ function LazyFileDiff(props: {
 	file: FileData;
 	viewType: ViewType;
 	comments: ReviewComment[];
+	githubComments?: GitHubReviewComment[];
 	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
 	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
@@ -538,6 +617,8 @@ function LazyFileDiff(props: {
 	onResolveComment?: (id: string) => void;
 	onDeleteComment?: (id: string) => void;
 	onReplyComment?: (parentId: string, content: string) => void;
+	onReplyGitHubComment?: (threadId: string, content: string) => void;
+	onResolveGitHubThread?: (threadId: string) => void;
 	isViewed?: boolean;
 	onToggleViewed?: () => void;
 	sessionId?: string;
@@ -600,6 +681,9 @@ export const DiffViewer = memo(function DiffViewer({
 	onOpenInEditor,
 	isLoading,
 	onReplyComment,
+	githubComments,
+	onReplyGitHubComment,
+	onResolveGitHubThread,
 }: DiffViewerProps) {
 	const files = useMemo(() => {
 		if (!rawDiff) return [];
@@ -652,6 +736,7 @@ export const DiffViewer = memo(function DiffViewer({
 					file={file}
 					viewType={viewType}
 					comments={comments}
+					githubComments={githubComments}
 					activeCommentLocation={activeCommentLocation}
 					onGutterClick={onGutterClick}
 					onSubmitComment={onSubmitComment}
@@ -659,6 +744,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onResolveComment={onResolveComment}
 					onDeleteComment={onDeleteComment}
 					onReplyComment={onReplyComment}
+					onReplyGitHubComment={onReplyGitHubComment}
+					onResolveGitHubThread={onResolveGitHubThread}
 					isViewed={isViewed?.(selectedFile) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(selectedFile!) : undefined}
 					sessionId={sessionId}
@@ -679,6 +766,7 @@ export const DiffViewer = memo(function DiffViewer({
 					file={file}
 					viewType={viewType}
 					comments={comments}
+					githubComments={githubComments}
 					activeCommentLocation={activeCommentLocation}
 					onGutterClick={onGutterClick}
 					onSubmitComment={onSubmitComment}
@@ -686,6 +774,8 @@ export const DiffViewer = memo(function DiffViewer({
 					onResolveComment={onResolveComment}
 					onDeleteComment={onDeleteComment}
 					onReplyComment={onReplyComment}
+					onReplyGitHubComment={onReplyGitHubComment}
+					onResolveGitHubThread={onResolveGitHubThread}
 					isViewed={isViewed?.(fp) ?? false}
 					onToggleViewed={onToggleViewed ? () => onToggleViewed(fp) : undefined}
 					sessionId={sessionId}
