@@ -379,8 +379,11 @@ export function lastMessageHasError(lines: JsonlLine[]): boolean {
     if (line.type === "assistant" && Array.isArray(line.message.content)) {
       for (const block of line.message.content) {
         if (block.type === "text" && block.text) {
-          const lower = block.text.toLowerCase();
-          if (lower.includes("error") && lower.includes("failed")) return true;
+          // Check the first ~500 chars only — actual error reports appear at the
+          // start of the message, not buried in large JSON/code output. This
+          // avoids false positives from domain terms like "payout_failed".
+          const snippet = block.text.slice(0, 500).toLowerCase();
+          if (snippet.includes("error") && snippet.includes("failed")) return true;
         }
       }
     }

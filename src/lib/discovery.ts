@@ -17,7 +17,6 @@ import {
   getJsonlMtime,
   hasPendingToolUse,
   isAskingForInput,
-  lastMessageHasError,
   linesToConversation,
   readFullConversation,
   readJsonlHead,
@@ -87,7 +86,6 @@ async function buildSession(
     lastTools: [],
     messageCount: 0,
   };
-  let hasError = false;
   let askingForInput = false;
   let pendingToolUse = false;
   let mtime: Date | null = null;
@@ -111,7 +109,6 @@ async function buildSession(
     startedAt = extractStartedAt(lines);
     branch = extractBranch(lines);
     preview = extractPreview(lines);
-    hasError = lastMessageHasError(lines);
     askingForInput = isAskingForInput(lines);
     pendingToolUse = hasPendingToolUse(lines);
     taskSummary = extractTaskSummary(headLines);
@@ -151,17 +148,15 @@ async function buildSession(
       pid: info.pid,
       jsonlMtime: mtime,
       cpuPercent: info.cpuPercent,
-      hasError,
       isAskingForInput: askingForInput,
       hasPendingToolUse: pendingToolUse,
     });
 
   // Hook "Stop" → "idle", but the JSONL may reveal a more specific state.
-  // The heuristic detects "waiting" (asking for input) and "errored" conditions
-  // that the hook can't distinguish from a normal stop.
+  // The heuristic detects "waiting" (asking for input) conditions that the
+  // hook can't distinguish from a normal stop.
   if (status === "idle") {
     if (askingForInput) status = "waiting";
-    else if (hasError) status = "errored";
   }
 
   return {
