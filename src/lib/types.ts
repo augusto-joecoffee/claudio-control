@@ -266,7 +266,8 @@ export type SideEffectKind =
   | "cache-read"
   | "event-emit"
   | "file-io"
-  | "process-exit";
+  | "process-exit"
+  | "external-sdk";
 
 export interface FileLocation {
   /** File path relative to repo root (same format as ReviewComment.filePath). */

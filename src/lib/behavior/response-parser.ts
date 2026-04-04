@@ -10,18 +10,21 @@ import type {
 	SideEffect, CodeSnippet, EntrypointKind, ConfidenceLevel, SideEffectKind,
 } from "../types";
 
+interface RawStep {
+	filePath?: string;
+	symbolName?: string;
+	line?: number;
+	isChanged?: boolean;
+	rationale?: string;
+	sideEffects?: Array<{ kind?: string; description?: string }>;
+}
+
 interface RawFlow {
 	name?: string;
 	entrypointKind?: string;
 	confidence?: string;
-	steps?: Array<{
-		filePath?: string;
-		symbolName?: string;
-		line?: number;
-		isChanged?: boolean;
-		rationale?: string;
-		sideEffects?: Array<{ kind?: string; description?: string }>;
-	}>;
+	entrypoints?: RawStep[];
+	steps?: RawStep[];
 }
 
 interface RawResponse {
@@ -35,7 +38,7 @@ const VALID_ENTRYPOINT_KINDS: EntrypointKind[] = [
 
 const VALID_SIDE_EFFECT_KINDS: SideEffectKind[] = [
 	"db-write", "db-read", "http-request", "queue-publish",
-	"cache-write", "cache-read", "event-emit", "file-io", "process-exit",
+	"cache-write", "cache-read", "event-emit", "file-io", "process-exit", "external-sdk",
 ];
 
 const VALID_CONFIDENCE: ConfidenceLevel[] = ["high", "medium", "low"];
@@ -181,8 +184,24 @@ function mapFlow(raw: RawFlow, warnings: string[]): ChangedBehavior | null {
 
 	if (steps.length === 0) return null;
 
-	// Use first step as entrypoint symbol
-	const entrypoint = steps[0].symbol;
+	// Use explicit entrypoints array if provided, otherwise first step
+	let entrypoint: ChangedSymbol;
+	if (raw.entrypoints && raw.entrypoints.length > 0) {
+		const ep = raw.entrypoints[0];
+		entrypoint = {
+			name: ep.symbolName ?? steps[0].symbol.name,
+			kind: "function",
+			location: {
+				filePath: ep.filePath ?? steps[0].symbol.location.filePath,
+				line: ep.line ?? 1,
+				isChanged: ep.isChanged ?? false,
+			},
+			qualifiedName: ep.symbolName ?? steps[0].symbol.name,
+			confidence,
+		};
+	} else {
+		entrypoint = steps[0].symbol;
+	}
 
 	return {
 		id: behaviorId,

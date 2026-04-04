@@ -13,6 +13,7 @@ const BADGE_CONFIG: Record<SideEffectKind, { label: string; borderColor: string;
 	"event-emit": { label: "Event", borderColor: "border-emerald-500/50", bgColor: "bg-emerald-500/10", textColor: "text-emerald-400" },
 	"file-io": { label: "File I/O", borderColor: "border-zinc-500/50", bgColor: "bg-zinc-500/10", textColor: "text-zinc-400" },
 	"process-exit": { label: "Exit", borderColor: "border-red-500/50", bgColor: "bg-red-500/10", textColor: "text-red-400" },
+	"external-sdk": { label: "SDK", borderColor: "border-orange-500/50", bgColor: "bg-orange-500/10", textColor: "text-orange-400" },
 };
 
 export const SideEffectBadge = memo(function SideEffectBadge({
