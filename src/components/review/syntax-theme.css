@@ -97,3 +97,88 @@
 .diff-viewer-container .diff-code-selected {
 	background-color: rgba(139, 92, 246, 0.10) !important;
 }
+
+/* -- Code folding -- */
+
+/* Gutter fold toggle triangle */
+.diff-fold-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 12px;
+	height: 12px;
+	flex-shrink: 0;
+	color: #484f58;
+	cursor: pointer;
+	border-radius: 2px;
+	transition: color 0.15s;
+}
+.diff-fold-toggle:hover {
+	color: #58a6ff;
+	background: rgba(56, 139, 253, 0.1);
+}
+
+/* Spacer to keep line numbers aligned when no fold indicator */
+.diff-fold-toggle-spacer {
+	display: inline-block;
+	width: 12px;
+	flex-shrink: 0;
+}
+
+/* Collapsed fold decoration bar */
+.diff-fold-decoration {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 22px;
+	padding: 0;
+	background: rgba(110, 84, 148, 0.12);
+	border-top: 1px solid rgba(110, 84, 148, 0.2);
+	border-bottom: 1px solid rgba(110, 84, 148, 0.2);
+	cursor: pointer;
+	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+	font-size: 10px;
+	transition: background 0.15s;
+}
+.diff-fold-decoration:hover {
+	background: rgba(110, 84, 148, 0.22);
+}
+
+.diff-fold-decoration-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	flex-shrink: 0;
+	height: 100%;
+	color: #a78bce;
+	border-right: 1px solid rgba(110, 84, 148, 0.2);
+}
+
+.diff-fold-decoration-label {
+	color: rgba(167, 139, 206, 0.75);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 50%;
+	line-height: 1;
+}
+
+.diff-fold-decoration-count {
+	color: rgba(167, 139, 206, 0.5);
+	white-space: nowrap;
+	font-size: 9px;
+	line-height: 1;
+}
+
+.diff-fold-decoration-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 5px;
+	border-radius: 8px;
+	background: rgba(210, 153, 34, 0.18);
+	color: #d29922;
+	font-size: 9px;
+	white-space: nowrap;
+	line-height: 1;
+}

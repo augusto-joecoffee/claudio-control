@@ -14,6 +14,8 @@ const refractor = {
 };
 import type { GitHubReviewComment, ReviewComment } from "@/lib/types";
 import { CommentThread } from "./CommentThread";
+import { detectFoldRegions, type FoldRegion } from "./fold-detection";
+import { applyFolds, type DisplayHunk } from "./fold-hunks";
 import "react-diff-view/style/index.css";
 import "./syntax-theme.css";
 
@@ -233,10 +235,56 @@ const FileDiff = memo(function FileDiff({
 	const [fileLines, setFileLines] = useState<string[] | null>(null);
 	const [expandedHunks, setExpandedHunks] = useState<HunkData[]>(file.hunks);
 
-	// Reset expanded hunks when the file changes
-	useEffect(() => { setExpandedHunks(file.hunks); }, [file.hunks]);
+	// Reset expanded hunks and fold state when the file changes
+	useEffect(() => { setExpandedHunks(file.hunks); setFoldedRegions(new Set()); }, [file.hunks]);
 
-	const tokens = useTokens(expandedHunks, filePath);
+	// --- Code folding ---
+	const [foldedRegions, setFoldedRegions] = useState<Set<string>>(new Set());
+
+	const foldRegions = useMemo(() => {
+		const allChanges = expandedHunks.flatMap((h) => h.changes);
+		return detectFoldRegions(allChanges, detectLanguage(filePath));
+	}, [expandedHunks, filePath]);
+
+	const displayHunks = useMemo(
+		() => applyFolds(expandedHunks, foldedRegions, foldRegions),
+		[expandedHunks, foldedRegions, foldRegions],
+	);
+
+	const justHunks = useMemo(() => displayHunks.map((dh) => dh.hunk), [displayHunks]);
+
+	const foldStartMap = useMemo(() => {
+		const map = new Map<number, FoldRegion>();
+		for (const r of foldRegions) map.set(r.startLine, r);
+		return map;
+	}, [foldRegions]);
+
+	const toggleFold = useCallback((key: string) => {
+		setFoldedRegions((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key); else next.add(key);
+			return next;
+		});
+	}, []);
+
+	// Auto-unfold when a comment targets a folded region
+	useEffect(() => {
+		if (!activeCommentLocation || activeCommentLocation.filePath !== filePath) return;
+		setFoldedRegions((prev) => {
+			const next = new Set(prev);
+			let changed = false;
+			for (const key of prev) {
+				const [s, e] = key.split("-").map(Number);
+				if (activeCommentLocation.startLine >= s && activeCommentLocation.startLine <= e) {
+					next.delete(key);
+					changed = true;
+				}
+			}
+			return changed ? next : prev;
+		});
+	}, [activeCommentLocation, filePath]);
+
+	const tokens = useTokens(justHunks, filePath);
 
 	const fetchFileLines = useCallback(async () => {
 		if (fileLines || !sessionId) return fileLines;
@@ -465,25 +513,44 @@ const FileDiff = memo(function FileDiff({
 	const renderGutter = useCallback(
 		({ change, side, renderDefault }: GutterOptions) => {
 			if (side === "new" || (viewType === "unified" && change.type !== "delete")) {
-				const newLine =
+				const ln =
 					change.type === "normal" ? change.newLineNumber : change.type === "insert" ? change.lineNumber : null;
+				const foldRegion = ln !== null ? foldStartMap.get(ln) : undefined;
+				const foldKey = foldRegion ? `${foldRegion.startLine}-${foldRegion.endLine}` : null;
+				const isFolded = foldKey ? foldedRegions.has(foldKey) : false;
 				return (
 					<span
-						className="cursor-pointer hover:bg-violet-500/20 rounded px-0.5"
+						className="cursor-pointer hover:bg-violet-500/20 rounded px-0.5 inline-flex items-center gap-0"
 						title="Click to comment · Shift+click to select range"
-						data-comment-line={newLine ?? undefined}
+						data-comment-line={ln ?? undefined}
 						onClick={(e) => {
 							e.stopPropagation();
-							if (newLine !== null) handleLineClick(newLine, e.shiftKey);
+							if (ln !== null) handleLineClick(ln, e.shiftKey);
 						}}
 					>
+						{foldKey ? (
+							<span
+								className="diff-fold-toggle"
+								title={isFolded ? "Expand block" : "Collapse block"}
+								onClick={(e) => { e.stopPropagation(); toggleFold(foldKey); }}
+							>
+								<svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+									{isFolded
+										? <path d="M3 1.5 L8 5 L3 8.5Z" />
+										: <path d="M1.5 3 L5 8 L8.5 3Z" />
+									}
+								</svg>
+							</span>
+						) : (
+							<span className="diff-fold-toggle-spacer" />
+						)}
 						{renderDefault()}
 					</span>
 				);
 			}
 			return renderDefault();
 		},
-		[viewType, handleLineClick],
+		[viewType, handleLineClick, foldStartMap, foldedRegions, toggleFold],
 	);
 
 	// Delegate clicks on the gutter <td> to trigger comments even when clicking
@@ -541,11 +608,11 @@ const FileDiff = memo(function FileDiff({
 
 			{/* Diff content — collapse when viewed */}
 			{!isViewed && <div className="border border-t-0 border-[#21262d] rounded-b-lg diff-viewer-container" style={{ clipPath: "inset(0 round 0 0 0.5rem 0.5rem)" }} onClick={handleGutterCellClick}>
-				{expandedHunks.length > 0 ? (
+				{justHunks.length > 0 ? (
 					<Diff
 						viewType={viewType}
 						diffType={file.type}
-						hunks={expandedHunks}
+						hunks={justHunks}
 						widgets={widgets}
 						tokens={tokens}
 						selectedChanges={selectedChanges}
@@ -553,7 +620,8 @@ const FileDiff = memo(function FileDiff({
 					>
 						{(hunks: HunkData[]) =>
 							hunks.flatMap((hunk, idx) => {
-								const hunkIdx = expandedHunks.indexOf(hunk);
+								const dh = displayHunks[idx] as DisplayHunk | undefined;
+								const origIdx = dh?.originalHunkIndex ?? idx;
 								const firstChange = hunk.changes[0];
 								const firstLine = firstChange?.type === "normal" ? firstChange.oldLineNumber
 									: firstChange?.type === "delete" ? firstChange.lineNumber : 1;
@@ -563,7 +631,10 @@ const FileDiff = memo(function FileDiff({
 								const prevLast = prevHunk?.changes[prevHunk.changes.length - 1];
 								const prevLastLine = prevLast?.type === "normal" ? prevLast.oldLineNumber
 									: prevLast?.type === "insert" ? prevLast.lineNumber : 0;
-								const canExpandUp = sessionId && (prevHunk ? firstLine > prevLastLine + 1 : firstLine > 1);
+								// Don't show expand-up between sub-hunks created by fold splitting
+								const prevDh = idx > 0 ? displayHunks[idx - 1] : undefined;
+								const isFoldBoundary = prevDh?.foldAfter != null;
+								const canExpandUp = !isFoldBoundary && sessionId && (prevHunk ? firstLine > prevLastLine + 1 : firstLine > 1);
 
 								const lastChange = hunk.changes[hunk.changes.length - 1];
 								const lastLine = lastChange?.type === "normal" ? lastChange.oldLineNumber
@@ -574,7 +645,8 @@ const FileDiff = memo(function FileDiff({
 								const nextFirst = nextHunk?.changes[0];
 								const nextFirstLine = nextFirst?.type === "normal" ? nextFirst.oldLineNumber
 									: nextFirst?.type === "delete" ? nextFirst.lineNumber : null;
-								const canExpandDown = sessionId && (
+								// Don't show expand-down if there's a fold decoration after this hunk
+								const canExpandDown = !dh?.foldAfter && sessionId && (
 									nextFirstLine ? lastLine < nextFirstLine - 1
 									: fileLines ? lastLine < fileLines.length : lastLine > 0
 								);
@@ -586,7 +658,7 @@ const FileDiff = memo(function FileDiff({
 									...(showHeader ? [
 										<Decoration key={`decoration-${hunk.content}`}>
 											<div
-												onClick={() => canExpandUp && expandUp(hunkIdx)}
+												onClick={() => canExpandUp && expandUp(origIdx)}
 												className={`px-0 bg-[rgba(56,139,253,0.15)] text-[10px] font-mono flex items-center h-[14px] border-t border-b border-[rgba(56,139,253,0.1)] ${canExpandUp ? "cursor-pointer hover:bg-[rgba(56,139,253,0.25)]" : ""} transition-colors`}
 											>
 												{canExpandUp && (
@@ -599,10 +671,27 @@ const FileDiff = memo(function FileDiff({
 										</Decoration>,
 									] : []),
 									<Hunk key={hunk.content} hunk={hunk} />,
+									...(dh?.foldAfter ? [
+										<Decoration key={`fold-${dh.foldAfter.key}`}>
+											<div
+												onClick={() => toggleFold(dh.foldAfter!.key)}
+												className="diff-fold-decoration"
+											>
+												<span className="diff-fold-decoration-icon">
+													<svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor"><path d="M3 1.5 L8 5 L3 8.5Z" /></svg>
+												</span>
+												<span className="diff-fold-decoration-label">{dh.foldAfter.label}</span>
+												<span className="diff-fold-decoration-count">{dh.foldAfter.hiddenLineCount} lines</span>
+												{dh.foldAfter.hiddenChangeCount > 0 && (
+													<span className="diff-fold-decoration-badge">{dh.foldAfter.hiddenChangeCount} changes</span>
+												)}
+											</div>
+										</Decoration>,
+									] : []),
 									...(canExpandDown ? [
 										<Decoration key={`expand-down-${hunk.content}`}>
 											<div
-												onClick={() => expandDown(hunkIdx)}
+												onClick={() => expandDown(origIdx)}
 												className="flex bg-[rgba(56,139,253,0.15)] h-[14px] border-t border-b border-[rgba(56,139,253,0.1)] cursor-pointer hover:bg-[rgba(56,139,253,0.25)] transition-colors"
 											>
 												<span className="flex items-center justify-center w-[40px] shrink-0 h-full text-[#58a6ff] border-r border-[rgba(56,139,253,0.1)]">

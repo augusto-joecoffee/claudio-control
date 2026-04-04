@@ -56,13 +56,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ses
 						(m) => m.type === "user" && (m.text?.includes(commentTag) || m.text?.includes(fileSignature)),
 					);
 					if (promptIdx >= 0) {
-						// Take the LAST assistant text — this matches what the terminal displays.
-						// Earlier assistant messages are intermediate (before tool calls).
+						// Only take text from the final assistant message (stop_reason "end_turn").
+						// Intermediate messages (stop_reason "tool_use") are just Claude
+						// thinking out loud before executing a tool — not the real answer.
 						let lastText: string | null = null;
 						for (let i = promptIdx + 1; i < conversation.length; i++) {
 							const m = conversation[i];
 							if (m.type === "user") break;
-							if (m.type === "assistant" && m.text) lastText = m.text;
+							if (m.type === "assistant" && m.text && m.stopReason === "end_turn") {
+								lastText = m.text;
+							}
 						}
 						if (lastText) response = lastText;
 					}

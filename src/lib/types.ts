@@ -92,6 +92,7 @@ export interface ConversationMessage {
   timestamp: string;
   text: string | null;
   toolUses: { name: string; input?: Record<string, unknown> }[];
+  stopReason?: string | null;
 }
 
 export interface SessionGroup {
