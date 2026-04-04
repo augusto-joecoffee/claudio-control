@@ -104,6 +104,33 @@ export async function getPrUrl(cwd: string, branch: string): Promise<string | nu
   }
 }
 
+/**
+ * Get the base branch for an open PR targeting the given branch.
+ * Returns null if no PR exists or the query fails.
+ */
+const prBaseCache = new Map<string, { base: string | null; ts: number }>();
+const PR_BASE_TTL_MS = 60_000;
+
+export async function getPrBaseBranch(cwd: string, branch: string): Promise<string | null> {
+  const cacheKey = `${cwd}::${branch}`;
+  const now = Date.now();
+  const cached = prBaseCache.get(cacheKey);
+  if (cached && now - cached.ts < PR_BASE_TTL_MS) return cached.base;
+
+  try {
+    const { stdout } = await execFileAsync("gh", ["pr", "view", branch, "--json", "baseRefName", "--jq", ".baseRefName"], {
+      cwd,
+      timeout: 5000,
+    });
+    const base = stdout.trim() || null;
+    prBaseCache.set(cacheKey, { base, ts: Date.now() });
+    return base;
+  } catch {
+    prBaseCache.set(cacheKey, { base: null, ts: Date.now() });
+    return null;
+  }
+}
+
 // TTL cache for worktree path — essentially static
 const worktreeCache = new Map<string, { result: string | null; ts: number }>();
 const WORKTREE_TTL_MS = 60_000;

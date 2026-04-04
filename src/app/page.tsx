@@ -100,6 +100,29 @@ export default function Dashboard() {
 
   const handleSessionKilled = useCallback((sessionId: string) => {
     setKilledSessionIds((prev) => ({ ...prev, [sessionId]: Date.now() }));
+    // Close the review window if one is open for this session
+    const api = (window as unknown as { electronAPI?: { closeReviewWindow: (id: string) => Promise<void> } }).electronAPI;
+    api?.closeReviewWindow(sessionId).catch(() => {});
+    // Clean up any inline terminal associated with this session
+    let killedDir: string | null = null;
+    setTerminals((prev) => {
+      for (const [d, entry] of prev) {
+        if (entry.sessionId === sessionId) {
+          killedDir = d;
+          if (entry.ptyId != null) {
+            const api = (window as unknown as { electronAPI?: { ptyKill: (id: number, killTmuxSession?: boolean) => Promise<void> } }).electronAPI;
+            api?.ptyKill(entry.ptyId, true).catch(() => {});
+          }
+          const next = new Map(prev);
+          next.delete(d);
+          return next;
+        }
+      }
+      return prev;
+    });
+    if (killedDir) {
+      setActiveTerminalDir((prev) => (prev === killedDir ? null : prev));
+    }
   }, []);
 
   const handleViewModeChange = useCallback((mode: ViewMode) => {
@@ -183,6 +206,17 @@ export default function Dashboard() {
   const handleSwitchTerminal = useCallback((dir: string) => {
     setActiveTerminalDir(dir);
     setTerminalMinimized(false);
+  }, []);
+
+  const handleReorderTerminals = useCallback((dirs: string[]) => {
+    setTerminals((prev) => {
+      const next = new Map<string, TerminalEntry>();
+      for (const dir of dirs) {
+        const entry = prev.get(dir);
+        if (entry) next.set(dir, entry);
+      }
+      return next;
+    });
   }, []);
 
   const handlePtySpawned = useCallback((dir: string, ptyId: number) => {
@@ -630,6 +664,7 @@ export default function Dashboard() {
             onClose={handleCloseTerminal}
             onMinimize={handleMinimizeTerminal}
             onSwitch={handleSwitchTerminal}
+            onReorder={handleReorderTerminals}
             onPtySpawned={handlePtySpawned}
             onPtyExited={handlePtyExited}
           />

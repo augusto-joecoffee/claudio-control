@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { ClaudeSession, TerminalEntry } from "@/lib/types";
 import { TerminalInstance } from "./TerminalInstance";
 
@@ -14,6 +17,52 @@ const terminalIcon = (
   </svg>
 );
 
+function SortableTab({
+  id,
+  active,
+  minimized,
+  label,
+  exited,
+  onSwitch,
+  onClose,
+}: {
+  id: string;
+  active: boolean;
+  minimized: boolean;
+  label: string;
+  exited: boolean;
+  onSwitch: (dir: string) => void;
+  onClose: (dir: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <button
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={() => onSwitch(id)}
+      onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id); } }}
+      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-(family-name:--font-geist-mono) whitespace-nowrap transition-colors cursor-grab active:cursor-grabbing ${
+        active
+          ? "bg-white/8 text-zinc-300 border border-white/10"
+          : "text-zinc-600 hover:text-zinc-400 hover:bg-white/4"
+      }`}
+    >
+      {!minimized && terminalIcon}
+      {label}
+      {exited && <span className="text-zinc-700 ml-1">(ended)</span>}
+    </button>
+  );
+}
+
 export function TerminalContainer({
   terminals,
   activeDir,
@@ -23,6 +72,7 @@ export function TerminalContainer({
   onClose,
   onMinimize,
   onSwitch,
+  onReorder,
   onPtySpawned,
   onPtyExited,
 }: {
@@ -34,11 +84,17 @@ export function TerminalContainer({
   onClose: (dir: string) => void;
   onMinimize: () => void;
   onSwitch: (dir: string) => void;
+  onReorder: (dirs: string[]) => void;
   onPtySpawned: (dir: string, ptyId: number) => void;
   onPtyExited: (dir: string) => void;
 }) {
   const entries = Array.from(terminals.entries());
   const [confirmCloseAll, setConfirmCloseAll] = useState(false);
+  const tabIds = entries.map(([dir]) => dir);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
 
   const getLabel = useCallback(
     (entry: TerminalEntry) => {
@@ -50,35 +106,20 @@ export function TerminalContainer({
     [sessions],
   );
 
-  const tabButtons = entries.map(([dir, entry]) => (
-    <div
-      key={dir}
-      className={`flex items-center gap-1 rounded-md text-[11px] font-(family-name:--font-geist-mono) whitespace-nowrap transition-colors ${
-        dir === activeDir
-          ? "bg-white/8 text-zinc-300 border border-white/10"
-          : "text-zinc-600 hover:text-zinc-400 hover:bg-white/4"
-      }`}
-    >
-      <button
-        onClick={() => onSwitch(dir)}
-        onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(dir); } }}
-        className="flex items-center gap-1.5 pl-2 py-0.5 pr-1"
-      >
-        {!minimized && terminalIcon}
-        {getLabel(entry)}
-        {entry.exited && <span className="text-zinc-700 ml-1">(ended)</span>}
-      </button>
-      <button
-        onClick={(e) => { e.stopPropagation(); onClose(dir); }}
-        className="flex items-center justify-center w-4 h-4 mr-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/10 transition-colors"
-        title="Close terminal"
-      >
-        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
-  ));
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (over && active.id !== over.id) {
+        const oldIndex = tabIds.indexOf(active.id as string);
+        const newIndex = tabIds.indexOf(over.id as string);
+        const newOrder = [...tabIds];
+        newOrder.splice(oldIndex, 1);
+        newOrder.splice(newIndex, 0, active.id as string);
+        onReorder(newOrder);
+      }
+    },
+    [tabIds, onReorder],
+  );
 
   return (
     <div
@@ -89,7 +130,22 @@ export function TerminalContainer({
       <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.02] border-b border-white/5 flex-shrink-0">
         <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto">
           {minimized && <span className="text-zinc-600 mr-1">{terminalIcon}</span>}
-          {tabButtons}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={tabIds} strategy={horizontalListSortingStrategy}>
+              {entries.map(([dir, entry]) => (
+                <SortableTab
+                  key={dir}
+                  id={dir}
+                  active={dir === activeDir}
+                  minimized={minimized}
+                  label={getLabel(entry)}
+                  exited={entry.exited}
+                  onSwitch={onSwitch}
+                  onClose={onClose}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0 ml-2">
           {minimized ? (

@@ -24,7 +24,7 @@ export function OutputPreview({ preview, status }: { preview: ConversationPrevie
         <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed">{preview.lastUserMessage}</p>
       )}
       {preview.assistantIsNewer && preview.lastAssistantText && (
-        <p className="text-[11px] text-zinc-500 line-clamp-1 leading-relaxed">{preview.lastAssistantText}</p>
+        <p className="text-[11px] text-zinc-500 line-clamp-2 leading-relaxed">{preview.lastAssistantText}</p>
       )}
       {showTools && (
         <div className="flex items-center gap-1.5 text-xs flex-wrap">
