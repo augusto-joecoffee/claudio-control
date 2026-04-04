@@ -45,6 +45,26 @@ function KanbanDraggableCard({ id, children }: { id: string; children: ReactNode
   );
 }
 
+// Draggable column wrapper — drag handle is the column header
+function DraggableColumn({ id, children }: { id: string; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: `col-${id}`,
+    data: { type: "kanban-column-sort", columnId: id },
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
+
 function UnstagedColumn({ sessions, renderCard }: { sessions: ClaudeSession[]; renderCard: (s: ClaudeSession) => ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({
     id: "column-__unstaged__",
@@ -88,6 +108,7 @@ interface KanbanBoardProps {
   onMoveCard: (sessionId: string, toColumnId: string) => void;
   onUnstageCard: (sessionId: string) => void;
   onReorderInColumn: (columnId: string, sessionIds: string[]) => void;
+  onReorderColumns: (columnIds: string[]) => void;
   onEditColumn: (columnId: string) => void;
   onAddColumn: () => void;
 }
@@ -100,6 +121,7 @@ export function KanbanBoard({
   onMoveCard,
   onUnstageCard,
   onReorderInColumn,
+  onReorderColumns,
   onEditColumn,
   onAddColumn,
 }: KanbanBoardProps) {
@@ -135,11 +157,13 @@ export function KanbanBoard({
   };
 
   const handleDragOver = (event: DragOverEvent) => {
-    const { over } = event;
+    const { active, over } = event;
     if (!over) {
       setOverColumnId(null);
       return;
     }
+    // Don't update card-over state when dragging columns
+    if (active.data.current?.type === "kanban-column-sort") return;
 
     // Check if hovering over a column drop zone
     const overData = over.data.current;
@@ -160,8 +184,23 @@ export function KanbanBoard({
     setActiveDragId(null);
     setOverColumnId(null);
 
-    if (!over) return;
+    if (!over || active.id === over.id) return;
 
+    // Column reorder
+    if (active.data.current?.type === "kanban-column-sort") {
+      const overType = over.data.current?.type;
+      if (overType !== "kanban-column-sort") return;
+      const columnIds = config.columns.map((c) => `col-${c.id}`);
+      const oldIndex = columnIds.indexOf(active.id as string);
+      const newIndex = columnIds.indexOf(over.id as string);
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        const rawIds = config.columns.map((c) => c.id);
+        onReorderColumns(arrayMove(rawIds, oldIndex, newIndex));
+      }
+      return;
+    }
+
+    // Card drag handling
     const sessionId = active.id as string;
     let targetColumnId: string | null = null;
 
@@ -225,20 +264,23 @@ export function KanbanBoard({
           )}
         />
 
-        {/* Kanban columns */}
-        {config.columns.map((column, idx) => (
-          <KanbanColumn
-            key={column.id}
-            column={column}
-            sessions={getSessionsForColumn(column.id)}
-            placements={state.placements}
-            renderCard={(session) => (
-              <KanbanDraggableCard id={session.id}>{renderCard(session)}</KanbanDraggableCard>
-            )}
-            onEditColumn={onEditColumn}
-            isLast={idx === config.columns.length - 1}
-          />
-        ))}
+        {/* Kanban columns — sortable horizontally */}
+        <SortableContext items={config.columns.map((c) => `col-${c.id}`)} strategy={horizontalListSortingStrategy}>
+          {config.columns.map((column, idx) => (
+            <DraggableColumn key={column.id} id={column.id}>
+              <KanbanColumn
+                column={column}
+                sessions={getSessionsForColumn(column.id)}
+                placements={state.placements}
+                renderCard={(session) => (
+                  <KanbanDraggableCard id={session.id}>{renderCard(session)}</KanbanDraggableCard>
+                )}
+                onEditColumn={onEditColumn}
+                isLast={idx === config.columns.length - 1}
+              />
+            </DraggableColumn>
+          ))}
+        </SortableContext>
 
         {/* Add column button */}
         <button

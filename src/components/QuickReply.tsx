@@ -69,7 +69,7 @@ export function QuickReply({
       {/* Show assistant text (Claude's question / explanation) */}
       {lastAssistantText && (
         <div className="mb-2 px-2.5 py-1.5 rounded-lg bg-blue-500/6 border border-blue-500/12">
-          <p className="text-[11px] text-blue-300/80 line-clamp-4 leading-relaxed">{lastAssistantText}</p>
+          <p className="text-[11px] text-blue-300/80 leading-relaxed">{lastAssistantText}</p>
         </div>
       )}
 
