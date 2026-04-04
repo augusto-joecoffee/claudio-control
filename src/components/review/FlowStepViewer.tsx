@@ -28,9 +28,19 @@ function buildChangedLineSet(behavior: ChangedBehavior): Map<string, Set<number>
 		if (!step.isChanged) continue;
 		const file = step.symbol.location.filePath;
 		const existing = map.get(file) ?? new Set<number>();
-		const start = step.symbol.location.line;
-		const end = step.symbol.location.endLine ?? start;
-		for (let i = start; i <= end; i++) existing.add(i);
+
+		if (step.changedRanges && step.changedRanges.length > 0) {
+			// Use the exact diff-changed line ranges
+			for (const range of step.changedRanges) {
+				for (let i = range.start; i <= range.end; i++) existing.add(i);
+			}
+		} else {
+			// Fallback: highlight the full symbol range
+			const start = step.symbol.location.line;
+			const end = step.symbol.location.endLine ?? start;
+			for (let i = start; i <= end; i++) existing.add(i);
+		}
+
 		map.set(file, existing);
 	}
 	return map;

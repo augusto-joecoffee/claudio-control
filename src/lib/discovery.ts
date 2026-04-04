@@ -1,6 +1,6 @@
 import { readdir, stat } from "fs/promises";
 import { join } from "path";
-import { ORPHAN_CHECK_INTERVAL_MS } from "./constants";
+import { ORPHAN_CHECK_INTERVAL_MS, WORKING_THRESHOLD_MS } from "./constants";
 import { getGitDiff, getGitSummary, getMainWorktreePath, getPrUrl } from "./git-info";
 import { type HookStatus, readAllHookStatuses } from "./hooks-reader";
 import { repoNameFromPath, workingDirToProjectDir } from "./paths";
@@ -132,7 +132,19 @@ async function buildSession(
   // APPROVAL_SETTLE_MS), because PermissionRequest hooks fire for auto-approved tools too.
   // If the hook status is available (and not null, meaning PermissionRequest was ignored),
   // use it; otherwise fall back to the heuristic classifier.
-  const hookDerivedStatus = hookStatus?.status ?? null;
+  let hookDerivedStatus = hookStatus?.status ?? null;
+
+  // Cross-validate stale "working" hook status: if the hook says "working" but
+  // JSONL hasn't been written recently AND CPU is low, the hook is stale (e.g.,
+  // session hit a conversation limit without firing Stop/SessionEnd). Fall back
+  // to the heuristic classifier which will correctly report "idle" or "finished".
+  if (hookDerivedStatus === "working" && mtime) {
+    const jsonlAge = Date.now() - mtime.getTime();
+    if (jsonlAge > WORKING_THRESHOLD_MS && info.cpuPercent < 5) {
+      hookDerivedStatus = null; // Stale — let classifier decide
+    }
+  }
+
   let status: ClaudeSession["status"] =
     hookDerivedStatus ??
     classifyStatus({

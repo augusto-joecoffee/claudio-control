@@ -4,6 +4,7 @@ import { memo, useCallback, useMemo, useState } from "react";
 import { refractor as _refractor } from "refractor";
 import type { Element, Text } from "hast";
 import type { CodeSnippet as CodeSnippetType } from "@/lib/types";
+import "./syntax-theme.css";
 
 const EXT_TO_LANG: Record<string, string> = {
 	ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
@@ -133,7 +134,7 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 	}, [highlighted, snippet.content]);
 
 	return (
-		<div className="rounded border border-[#21262d] bg-[#0d1117] overflow-hidden text-[12px] font-mono leading-5">
+		<div className="diff-viewer-container rounded border border-[#21262d] bg-[#0d1117] overflow-hidden text-[12px] leading-5" style={{ fontFamily: "var(--font-geist-mono), monospace" }}>
 			{canExpandUp && onExpandUp && (
 				<button
 					onClick={onExpandUp}
@@ -152,15 +153,25 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 					return (
 						<div
 							key={lineNum}
-							className={`flex ${isChanged ? "bg-emerald-500/8 border-l-2 border-emerald-500/40" : "border-l-2 border-transparent"}`}
+							className="flex"
+							style={isChanged ? { background: "rgba(46, 160, 67, 0.15)" } : undefined}
 						>
 							<button
 								onClick={() => onLineClick?.(lineNum)}
-								className="w-10 shrink-0 text-right pr-2 text-[#484f58] hover:text-blue-400 select-none cursor-pointer transition-colors"
+								className="w-10 shrink-0 text-right pr-2 select-none cursor-pointer transition-colors border-r border-[#21262d]"
+								style={isChanged
+									? { background: "rgba(46, 160, 67, 0.2)", color: "#3fb950" }
+									: { color: "#484f58" }
+								}
+								onMouseEnter={(e) => { e.currentTarget.style.color = "#58a6ff"; e.currentTarget.style.background = "rgba(56, 139, 253, 0.1)"; }}
+								onMouseLeave={(e) => {
+									if (isChanged) { e.currentTarget.style.color = "#3fb950"; e.currentTarget.style.background = "rgba(46, 160, 67, 0.2)"; }
+									else { e.currentTarget.style.color = "#484f58"; e.currentTarget.style.background = ""; }
+								}}
 							>
 								{lineNum}
 							</button>
-							<span className="flex-1 px-2 whitespace-pre text-zinc-300">
+							<span className="flex-1 pl-4 pr-2 whitespace-pre" style={{ color: "#c9d1d9" }}>
 								{highlightedLines && highlightedLines[i]
 									? highlightedLines[i]
 									: line}

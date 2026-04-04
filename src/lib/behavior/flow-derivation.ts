@@ -238,6 +238,7 @@ function buildChangeFlow(
 					callsTo: (fullGraph.outbound.get(group.entrypointId) ?? []).map((e) => e.to),
 					isChanged: false,
 					changeKind: null,
+					changedRanges: [],
 					rationale: "Entry point (context)",
 					confidence: "high",
 				});
@@ -267,6 +268,7 @@ function buildChangeFlow(
 			callsTo: (fullGraph.outbound.get(id) ?? []).map((e) => e.to),
 			isChanged: true,
 			changeKind: anchor.changeKind,
+			changedRanges: anchor.changedRanges,
 			rationale: "Modified by this diff",
 			confidence: anchor.confidence,
 		});
@@ -353,13 +355,15 @@ function traceDownstreamSideEffects(
 
 				// Only include if it has side effects
 				if (node.sideEffects.length > 0) {
+					const downstreamAnchor = impact.changed.get(edge.to);
 					results.push({
 						node,
 						order: 0, // will be set by caller
 						sideEffects: node.sideEffects,
 						callsTo: (fullGraph.outbound.get(edge.to) ?? []).map((e) => e.to),
-						isChanged: impact.changed.has(edge.to),
-						changeKind: impact.changed.get(edge.to)?.changeKind ?? null,
+						isChanged: !!downstreamAnchor,
+						changeKind: downstreamAnchor?.changeKind ?? null,
+						changedRanges: downstreamAnchor?.changedRanges ?? [],
 						rationale: "Downstream side effect",
 						confidence: edge.confidence,
 					});

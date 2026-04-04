@@ -158,6 +158,8 @@ export interface FlowStep {
 	callsTo: SymbolId[];
 	isChanged: boolean;
 	changeKind: ChangeKind | null;
+	/** Exact diff-changed line ranges (1-based, inclusive). */
+	changedRanges: Array<{ start: number; end: number }>;
 	rationale: string;
 	confidence: ConfidenceLevel;
 }

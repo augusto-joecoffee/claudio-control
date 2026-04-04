@@ -168,6 +168,10 @@ export interface KanbanCardPlacement {
   pendingOutputPrompt?: number;
   /** Timestamp (ms) when the last prompt was sent to this session via kanban. Cleared on next working transition. */
   promptSentAt?: number;
+  /** JSONL file byte size recorded when a prompt was sent. Used for deterministic completion detection. */
+  jsonlByteOffset?: number;
+  /** JSONL file path at the time of prompt send. */
+  jsonlPathAtSend?: string;
 }
 
 export interface KanbanState {
@@ -318,6 +322,8 @@ export interface ExecutionStep {
   rationale: string;
   /** Whether this step's code was modified by the diff. */
   isChanged: boolean;
+  /** Exact diff-changed line ranges within this step (1-based, inclusive). */
+  changedRanges?: Array<{ start: number; end: number }>;
   confidence: ConfidenceLevel;
 }
 

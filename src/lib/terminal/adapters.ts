@@ -65,6 +65,17 @@ export async function typeText(info: TerminalInfo, text: string): Promise<void> 
   await adapter.sendText(info, text);
 }
 
+/** Read the visible content of a tmux pane as plain text. Returns null for non-tmux sessions. */
+export async function capturePaneContent(info: TerminalInfo): Promise<string | null> {
+  if (!info.inTmux || !info.tmux) return null;
+  const { stdout } = await execFileAsync(
+    getTmuxPathSync(),
+    ["capture-pane", "-p", "-t", info.tmux.paneId],
+    { timeout: PROCESS_TIMEOUT_MS },
+  );
+  return stdout;
+}
+
 export async function sendKeystroke(info: TerminalInfo, keystroke: string): Promise<void> {
   // tmux: send directly to the pane
   if (info.inTmux && info.tmux) {

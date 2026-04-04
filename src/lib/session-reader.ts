@@ -600,3 +600,132 @@ export function extractInitialPrompt(headLines: JsonlLine[]): string | null {
   }
   return null;
 }
+
+// ── JSONL byte-offset completion tracking ──
+
+export interface JsonlCompletionStatus {
+  /** Whether a user message (our prompt) appeared after the recorded offset. */
+  promptReceived: boolean;
+  /** Whether the last assistant message has stop_reason "end_turn" with no pending tool calls. */
+  isComplete: boolean;
+  /** Whether Claude is mid-tool-chain (stop_reason "tool_use" or awaiting tool_result). */
+  isMidToolChain: boolean;
+  /** Whether Claude has a pending tool_use waiting for approval or is asking for user input. */
+  isWaiting: boolean;
+  /** Whether stop_reason is "max_tokens" (response cut off). */
+  isMaxTokens: boolean;
+  /** Current JSONL file size (for reference). */
+  currentFileSize: number;
+}
+
+/**
+ * Read JSONL content written after `byteOffset` and determine whether a sent
+ * prompt has been received and completed by Claude.
+ *
+ * Returns null if no new data has been written since the offset, or if the
+ * file has been truncated/rotated (size < offset).
+ */
+export async function checkJsonlCompletion(
+  jsonlPath: string,
+  byteOffset: number,
+): Promise<JsonlCompletionStatus | null> {
+  let fh;
+  try {
+    fh = await open(jsonlPath, "r");
+    const fileSize = (await fh.stat()).size;
+
+    if (fileSize <= byteOffset) {
+      return null; // No new data (or file truncated)
+    }
+
+    const readSize = fileSize - byteOffset;
+    const buf = Buffer.alloc(readSize);
+    await fh.read(buf, 0, readSize, byteOffset);
+
+    const text = buf.toString("utf-8");
+    const rawLines = text.split("\n").filter(Boolean);
+
+    // First line may be partial if byteOffset landed mid-line — try to parse all,
+    // discard any that fail.
+    const lines: JsonlLine[] = [];
+    for (const raw of rawLines) {
+      try { lines.push(JSON.parse(raw)); } catch { /* skip partial/malformed */ }
+    }
+
+    if (lines.length === 0) {
+      return null;
+    }
+
+    // Check if our prompt was received (any user message in new content)
+    let promptReceived = false;
+    for (const line of lines) {
+      if (line.type === "user" && line.message) {
+        promptReceived = true;
+        break;
+      }
+    }
+
+    // Walk backwards to find the last meaningful message
+    let isComplete = false;
+    let isMidToolChain = false;
+    let isWaiting = false;
+    let isMaxTokens = false;
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (line.type === "progress" || line.type === "file-history-snapshot" || line.type === "system") continue;
+      if (!line.message) continue;
+
+      if (line.type === "assistant") {
+        const stopReason = line.message.stop_reason;
+        const hasToolUseBlock = Array.isArray(line.message.content) &&
+          line.message.content.some((b) => b.type === "tool_use");
+
+        if (stopReason === "end_turn") {
+          if (hasToolUseBlock) {
+            // end_turn but with tool_use blocks = pending approval
+            isWaiting = true;
+          } else {
+            isComplete = true;
+          }
+        } else if (stopReason === "tool_use") {
+          // Claude called a tool — mid-chain. Check if it's pending approval
+          // (no subsequent tool_result) or being auto-executed.
+          isMidToolChain = true;
+        } else if (stopReason === "max_tokens") {
+          isMaxTokens = true;
+        }
+        break;
+      }
+
+      if (line.type === "user") {
+        // Last meaningful message is a user message (tool_result or new input).
+        // If it's a tool_result, Claude is processing it — mid-chain.
+        if (Array.isArray(line.message.content)) {
+          isMidToolChain = true;
+        }
+        // If it's a string (user text), the prompt was received but Claude
+        // hasn't responded yet — still mid-chain from our perspective.
+        else {
+          isMidToolChain = true;
+        }
+        break;
+      }
+
+      break;
+    }
+
+    return {
+      promptReceived,
+      isComplete,
+      isMidToolChain,
+      isWaiting,
+      isMaxTokens,
+      currentFileSize: fileSize,
+    };
+  } catch {
+    return null; // File doesn't exist or can't be read
+  } finally {
+    await fh?.close();
+  }
+}

@@ -1,5 +1,6 @@
 export type { CreateSessionPublicOpts as CreateSessionOpts } from "./adapters";
 export {
+  capturePaneContent,
   createSession,
   focusSession,
   listTmuxSessions,

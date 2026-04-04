@@ -173,6 +173,7 @@ function flowToBehavior(flow: ReviewerFlow): ChangedBehavior {
 		callsTo: step.callsTo.map((id) => parseSymbolId(id).qualifiedName),
 		rationale: step.rationale,
 		isChanged: step.isChanged,
+		changedRanges: step.changedRanges.length > 0 ? step.changedRanges : undefined,
 		confidence: step.confidence,
 	}));
 

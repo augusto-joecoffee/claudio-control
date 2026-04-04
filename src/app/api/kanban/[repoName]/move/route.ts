@@ -1,3 +1,4 @@
+import { stat as fsStat } from "fs/promises";
 import { discoverSessions } from "@/lib/discovery";
 import { buildFullColumnPrompt, extractColumnOutput } from "@/lib/kanban-engine";
 import { clearMessageBar, sendPromptToSession } from "@/lib/kanban-executor";
@@ -59,15 +60,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
 
         placement.queuedColumnId = toColumnId;
         placement.pendingOutputPrompt = Date.now();
-        await saveKanbanState(decoded, state);
 
         try {
+          // Record JSONL byte offset before sending for deterministic completion detection
+          if (session.jsonlPath) {
+            try {
+              placement.jsonlByteOffset = (await fsStat(session.jsonlPath)).size;
+              placement.jsonlPathAtSend = session.jsonlPath;
+            } catch { /* fall back to timer-based */ }
+          }
+          await saveKanbanState(decoded, state);
           await clearMessageBar(session);
           await sendPromptToSession(session, outputPromptText);
         } catch (err) {
           console.error("Failed to send output prompt:", err);
           placement.queuedColumnId = undefined;
           placement.pendingOutputPrompt = undefined;
+          placement.jsonlByteOffset = undefined;
+          placement.jsonlPathAtSend = undefined;
           await saveKanbanState(decoded, state);
           return NextResponse.json({ ok: true, queued: false, promptSent: false, error: String(err) });
         }
@@ -91,16 +101,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
       const prompt = await buildFullColumnPrompt(targetColumn, previousOutput, session.workingDirectory, placement.initialPrompt ?? session.initialPrompt ?? undefined);
       await saveKanbanState(decoded, state);
 
-      // Fire prompt in background — don't block the response
       if (prompt) {
-        (async () => {
+        // Record byte offset before sending for deterministic completion tracking
+        if (session.jsonlPath) {
+          try {
+            placement.jsonlByteOffset = (await fsStat(session.jsonlPath)).size;
+            placement.jsonlPathAtSend = session.jsonlPath;
+            placement.promptSentAt = Date.now();
+            await saveKanbanState(decoded, state);
+          } catch { /* fall back to timer-based */ }
+        }
+
+        if (fromUnstaged) {
+          // Await for unstaged moves — deterministic clear-then-send
           try {
             await clearMessageBar(session);
             await sendPromptToSession(session, prompt);
           } catch (err) {
             console.error("Failed to send prompt:", err);
           }
-        })();
+        } else {
+          // Fire in background for column-to-column moves
+          (async () => {
+            try {
+              await clearMessageBar(session);
+              await sendPromptToSession(session, prompt);
+            } catch (err) {
+              console.error("Failed to send prompt:", err);
+            }
+          })();
+        }
       }
 
       return NextResponse.json({ ok: true, queued: false, promptSent: !!prompt });
