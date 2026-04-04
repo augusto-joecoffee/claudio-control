@@ -43,23 +43,36 @@ function SortableTab({
   };
 
   return (
-    <button
+    <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      onClick={() => onSwitch(id)}
-      onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id); } }}
-      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-(family-name:--font-geist-mono) whitespace-nowrap transition-colors cursor-grab active:cursor-grabbing ${
+      className={`flex items-center gap-1 rounded-md text-[11px] font-(family-name:--font-geist-mono) whitespace-nowrap transition-colors ${
         active
           ? "bg-white/8 text-zinc-300 border border-white/10"
           : "text-zinc-600 hover:text-zinc-400 hover:bg-white/4"
       }`}
     >
-      {!minimized && terminalIcon}
-      {label}
-      {exited && <span className="text-zinc-700 ml-1">(ended)</span>}
-    </button>
+      <button
+        {...attributes}
+        {...listeners}
+        onClick={() => onSwitch(id)}
+        onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id); } }}
+        className="flex items-center gap-1.5 pl-2 py-0.5 pr-1 cursor-grab active:cursor-grabbing"
+      >
+        {!minimized && terminalIcon}
+        {label}
+        {exited && <span className="text-zinc-700 ml-1">(ended)</span>}
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(id); }}
+        className="flex items-center justify-center w-4 h-4 mr-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/10 transition-colors"
+        title="Close terminal"
+      >
+        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
