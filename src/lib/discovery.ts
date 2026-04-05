@@ -1,6 +1,6 @@
 import { readdir, stat } from "fs/promises";
 import { join } from "path";
-import { ORPHAN_CHECK_INTERVAL_MS } from "./constants";
+import { ORPHAN_CHECK_INTERVAL_MS, WORKING_THRESHOLD_MS } from "./constants";
 import { getGitDiff, getGitSummary, getMainWorktreePath, getPrUrl } from "./git-info";
 import { type HookStatus, readAllHookStatuses } from "./hooks-reader";
 import { repoNameFromPath, workingDirToProjectDir } from "./paths";
@@ -17,7 +17,6 @@ import {
   getJsonlMtime,
   hasPendingToolUse,
   isAskingForInput,
-  lastMessageHasError,
   linesToConversation,
   readFullConversation,
   readJsonlHead,
@@ -87,7 +86,6 @@ async function buildSession(
     lastTools: [],
     messageCount: 0,
   };
-  let hasError = false;
   let askingForInput = false;
   let pendingToolUse = false;
   let mtime: Date | null = null;
@@ -111,7 +109,6 @@ async function buildSession(
     startedAt = extractStartedAt(lines);
     branch = extractBranch(lines);
     preview = extractPreview(lines);
-    hasError = lastMessageHasError(lines);
     askingForInput = isAskingForInput(lines);
     pendingToolUse = hasPendingToolUse(lines);
     taskSummary = extractTaskSummary(headLines);
@@ -132,24 +129,34 @@ async function buildSession(
   // APPROVAL_SETTLE_MS), because PermissionRequest hooks fire for auto-approved tools too.
   // If the hook status is available (and not null, meaning PermissionRequest was ignored),
   // use it; otherwise fall back to the heuristic classifier.
-  const hookDerivedStatus = hookStatus?.status ?? null;
+  let hookDerivedStatus = hookStatus?.status ?? null;
+
+  // Cross-validate stale "working" hook status: if the hook says "working" but
+  // JSONL hasn't been written recently AND CPU is low, the hook is stale (e.g.,
+  // session hit a conversation limit without firing Stop/SessionEnd). Fall back
+  // to the heuristic classifier which will correctly report "idle" or "finished".
+  if (hookDerivedStatus === "working" && mtime) {
+    const jsonlAge = Date.now() - mtime.getTime();
+    if (jsonlAge > WORKING_THRESHOLD_MS && info.cpuPercent < 5) {
+      hookDerivedStatus = null; // Stale — let classifier decide
+    }
+  }
+
   let status: ClaudeSession["status"] =
     hookDerivedStatus ??
     classifyStatus({
       pid: info.pid,
       jsonlMtime: mtime,
       cpuPercent: info.cpuPercent,
-      hasError,
       isAskingForInput: askingForInput,
       hasPendingToolUse: pendingToolUse,
     });
 
   // Hook "Stop" → "idle", but the JSONL may reveal a more specific state.
-  // The heuristic detects "waiting" (asking for input) and "errored" conditions
-  // that the hook can't distinguish from a normal stop.
+  // The heuristic detects "waiting" (asking for input) conditions that the
+  // hook can't distinguish from a normal stop.
   if (status === "idle") {
     if (askingForInput) status = "waiting";
-    else if (hasError) status = "errored";
   }
 
   return {

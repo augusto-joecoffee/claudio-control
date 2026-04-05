@@ -7,7 +7,6 @@ function makeInput(
     pid: number | null;
     jsonlMtime: Date | null;
     cpuPercent: number;
-    hasError: boolean;
     isAskingForInput: boolean;
     hasPendingToolUse: boolean;
   }> = {},
@@ -16,7 +15,6 @@ function makeInput(
     pid: 1234,
     jsonlMtime: new Date(),
     cpuPercent: 0,
-    hasError: false,
     isAskingForInput: false,
     hasPendingToolUse: false,
     ...overrides,
@@ -33,10 +31,6 @@ describe("classifyStatus", () => {
 
   it("returns finished when pid is null", () => {
     expect(classifyStatus(makeInput({ pid: null }))).toBe("finished");
-  });
-
-  it("returns errored when hasError is true", () => {
-    expect(classifyStatus(makeInput({ hasError: true }))).toBe("errored");
   });
 
   it("returns working when recent write and CPU active", () => {
@@ -193,11 +187,7 @@ describe("classifyStatus", () => {
   });
 
   // Priority ordering tests
-  it("prioritizes errored over working", () => {
-    expect(classifyStatus(makeInput({ hasError: true, cpuPercent: 50 }))).toBe("errored");
-  });
-
-  it("prioritizes finished over errored", () => {
-    expect(classifyStatus(makeInput({ pid: null, hasError: true }))).toBe("finished");
+  it("prioritizes finished over everything", () => {
+    expect(classifyStatus(makeInput({ pid: null, cpuPercent: 50 }))).toBe("finished");
   });
 });

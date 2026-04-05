@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, unlink, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
 import type { ReviewSession } from "./types";
+import { deleteBehaviorAnalysis } from "./behavior-store";
 
 const CONFIG_DIR = join(homedir(), ".claude-control");
 const REVIEW_DIR = join(CONFIG_DIR, "reviews");
@@ -60,4 +61,6 @@ export async function deleteReview(sessionId: string): Promise<void> {
 	} catch {
 		// Already deleted
 	}
+	// Also clean up the behavior analysis file
+	await deleteBehaviorAnalysis(sessionId);
 }

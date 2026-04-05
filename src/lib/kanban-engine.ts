@@ -1,11 +1,12 @@
 import { execFile } from "child_process";
-import { readFile } from "fs/promises";
+import { readFile, stat as fsStat } from "fs/promises";
 import { join } from "path";
 import { promisify } from "util";
-import { CASCADE_SETTLE_MS, OUTPUT_PROMPT_TIMEOUT_MS, PROCESS_TIMEOUT_MS, PROMPT_CONFIRM_TIMEOUT_MS } from "./constants";
+import { CASCADE_SETTLE_MS, JSONL_COMPLETION_TIMEOUT_MS, OUTPUT_PROMPT_TIMEOUT_MS, PROCESS_TIMEOUT_MS, PROMPT_CONFIRM_TIMEOUT_MS } from "./constants";
 import { getGitDiff } from "./git-info";
 import { clearMessageBar, sendPromptToSession } from "./kanban-executor";
 import { loadKanbanConfig, loadKanbanState, saveKanbanState } from "./kanban-store";
+import { checkJsonlCompletion } from "./session-reader";
 import type { ClaudeSession, KanbanColumn, KanbanState } from "./types";
 
 const execFileAsync = promisify(execFile);
@@ -176,15 +177,48 @@ export async function processIdleTransitions(
       if (!currentColumn) continue;
 
       // ── Guard: prompt was recently sent, wait for confirmation ──
-      // After sending a prompt, Claude needs time to receive and start processing it.
-      // Skip this session until either the timeout elapses or session goes "working".
-      if (placement.promptSentAt && now - placement.promptSentAt < PROMPT_CONFIRM_TIMEOUT_MS) {
-        continue;
-      }
-      // Clear stale promptSentAt once the timeout has passed
       if (placement.promptSentAt) {
-        placement.promptSentAt = undefined;
-        stateChanged = true;
+        if (placement.jsonlByteOffset != null && placement.jsonlPathAtSend) {
+          // Deterministic path: check JSONL for completion
+          const completion = await checkJsonlCompletion(placement.jsonlPathAtSend, placement.jsonlByteOffset);
+          if (!completion) {
+            // No new JSONL data — prompt may not have been received yet
+            if (now - placement.promptSentAt < JSONL_COMPLETION_TIMEOUT_MS) {
+              continue; // Still waiting
+            }
+            // Safety timeout: clear tracking, fall through to old heuristic on next tick
+            console.warn(`[kanban] JSONL completion timeout for session ${placement.sessionId}, clearing tracking`);
+            placement.jsonlByteOffset = undefined;
+            placement.jsonlPathAtSend = undefined;
+            placement.promptSentAt = undefined;
+            stateChanged = true;
+            continue;
+          }
+          if (!completion.isComplete) {
+            // JSONL has new data but not done yet — check safety timeout
+            if (now - placement.promptSentAt < JSONL_COMPLETION_TIMEOUT_MS) {
+              continue; // Still processing
+            }
+            console.warn(`[kanban] JSONL completion timeout (mid-processing) for session ${placement.sessionId}`);
+            placement.jsonlByteOffset = undefined;
+            placement.jsonlPathAtSend = undefined;
+            placement.promptSentAt = undefined;
+            stateChanged = true;
+            continue;
+          }
+          // JSONL confirms completion — clear the guard and proceed.
+          // Keep jsonlByteOffset/jsonlPathAtSend so Case B (autocascade)
+          // and Case A1 (queued move) can reuse the deterministic check.
+          placement.promptSentAt = undefined;
+          stateChanged = true;
+        } else {
+          // Legacy path: fixed timeout
+          if (now - placement.promptSentAt < PROMPT_CONFIRM_TIMEOUT_MS) {
+            continue;
+          }
+          placement.promptSentAt = undefined;
+          stateChanged = true;
+        }
       }
 
       // CASE A: Queued move
@@ -194,10 +228,23 @@ export async function processIdleTransitions(
 
         // A1: Output prompt was sent and just finished — now do the actual move
         if (placement.pendingOutputPrompt) {
-          // Timeout guard: if the output prompt has been pending too long, force-complete
           const pendingSince = placement.pendingOutputPrompt;
-          if (session.status === "waiting" && now - pendingSince < OUTPUT_PROMPT_TIMEOUT_MS) {
-            continue; // Still processing or waiting within timeout
+
+          // Deterministic JSONL check for output prompt completion
+          if (placement.jsonlByteOffset != null && placement.jsonlPathAtSend) {
+            const completion = await checkJsonlCompletion(placement.jsonlPathAtSend, placement.jsonlByteOffset);
+            if (!completion || !completion.isComplete) {
+              // Not done yet — check timeout
+              if (now - pendingSince < OUTPUT_PROMPT_TIMEOUT_MS) {
+                continue;
+              }
+              // Force-complete on timeout
+            }
+          } else {
+            // Legacy: use status + timeout
+            if (session.status === "waiting" && now - pendingSince < OUTPUT_PROMPT_TIMEOUT_MS) {
+              continue;
+            }
           }
 
           const output = await extractColumnOutput(currentColumn, session);
@@ -212,6 +259,8 @@ export async function processIdleTransitions(
           placement.pendingOutputPrompt = undefined;
           placement.clearOnMove = undefined;
           placement.lastOutput = output;
+          placement.jsonlByteOffset = undefined;
+          placement.jsonlPathAtSend = undefined;
           stateChanged = true;
 
           if (prompt) {
@@ -246,6 +295,8 @@ export async function processIdleTransitions(
         placement.queuedColumnId = undefined;
         placement.clearOnMove = undefined;
         placement.lastOutput = output;
+        placement.jsonlByteOffset = undefined;
+        placement.jsonlPathAtSend = undefined;
         stateChanged = true;
 
         if (prompt) {
@@ -255,17 +306,34 @@ export async function processIdleTransitions(
       }
 
       // CASE B: Auto-cascade — only when truly done.
-      // Guards (all must pass):
-      // 1. Not "waiting" (mid-task question or permission prompt)
-      // 2. Not cut off mid-response (stop_reason: "max_tokens")
-      // 3. No JSONL activity for settle period (avoids brief idle flashes between tool calls)
-      const idleAge = session.lastActivity ? now - new Date(session.lastActivity).getTime() : Infinity;
-      const settleMs = currentColumn.settleMs ?? CASCADE_SETTLE_MS;
-      const cascadeReady =
-        currentColumn.autoCascade &&
-        session.status !== "waiting" &&
-        session.lastStopReason !== "max_tokens" &&
-        idleAge >= settleMs;
+      if (!currentColumn.autoCascade) {
+        // Clean up stale JSONL tracking preserved by the guard
+        if (placement.jsonlByteOffset != null) {
+          placement.jsonlByteOffset = undefined;
+          placement.jsonlPathAtSend = undefined;
+          stateChanged = true;
+        }
+        continue;
+      }
+
+      let cascadeReady = false;
+
+      if (placement.jsonlByteOffset != null && placement.jsonlPathAtSend) {
+        // Deterministic path: check JSONL for completion
+        const completion = await checkJsonlCompletion(placement.jsonlPathAtSend, placement.jsonlByteOffset);
+        if (completion) {
+          cascadeReady = completion.isComplete && !completion.isWaiting && !completion.isMaxTokens;
+        }
+        // If null (no new data) or not complete, cascadeReady stays false
+      } else {
+        // Legacy fallback: settle-timer heuristic
+        const idleAge = session.lastActivity ? now - new Date(session.lastActivity).getTime() : Infinity;
+        const settleMs = currentColumn.settleMs ?? CASCADE_SETTLE_MS;
+        cascadeReady =
+          session.status !== "waiting" &&
+          session.lastStopReason !== "max_tokens" &&
+          idleAge >= settleMs;
+      }
 
       if (cascadeReady) {
         const currentIndex = config.columns.findIndex((c) => c.id === currentColumn.id);
@@ -279,6 +347,8 @@ export async function processIdleTransitions(
 
           placement.queuedColumnId = nextColumn.id;
           placement.pendingOutputPrompt = now;
+          placement.jsonlByteOffset = undefined;
+          placement.jsonlPathAtSend = undefined;
           stateChanged = true;
 
           if (outputPromptText) {
@@ -302,6 +372,8 @@ export async function processIdleTransitions(
 
         placement.columnId = nextColumn.id;
         placement.lastOutput = output;
+        placement.jsonlByteOffset = undefined;
+        placement.jsonlPathAtSend = undefined;
         stateChanged = true;
 
         if (prompt) {
@@ -314,17 +386,27 @@ export async function processIdleTransitions(
       await saveKanbanState(repoId, state);
     }
 
-    // Execute actions: clear message bar, send prompts to sessions, and record promptSentAt
+    // Execute actions: clear message bar, send prompts to sessions, and record tracking
     for (const action of actions) {
       const session = sessions.find((s) => s.id === action.sessionId);
       if (session) {
         try {
           await clearMessageBar(session);
+          // Record JSONL byte offset BEFORE sending (captures file state pre-prompt)
+          let byteOffset: number | undefined;
+          if (session.jsonlPath) {
+            try {
+              byteOffset = (await fsStat(session.jsonlPath)).size;
+            } catch { /* can't stat — fall back to timer-based */ }
+          }
           await sendPromptToSession(session, action.prompt);
-          // Track when we sent this prompt to guard against race-window double-cascade
           const placement = state.placements.find((p) => p.sessionId === action.sessionId);
           if (placement) {
             placement.promptSentAt = Date.now();
+            if (byteOffset != null && session.jsonlPath) {
+              placement.jsonlByteOffset = byteOffset;
+              placement.jsonlPathAtSend = session.jsonlPath;
+            }
           }
         } catch (err) {
           console.error(`Kanban: failed to send prompt to session ${action.sessionId}:`, err);

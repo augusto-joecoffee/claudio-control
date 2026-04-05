@@ -16,7 +16,7 @@ import { usePrStatus } from "@/hooks/usePrStatus";
 import { useSessions } from "@/hooks/useSessions";
 import { useSettings } from "@/hooks/useSettings";
 import { flattenGroupedSessions } from "@/lib/group-sessions";
-import { getTerminalStore, setTerminalStore } from "@/lib/terminal-store";
+import { getSavedTerminalOrder, getTerminalStore, setTerminalStore } from "@/lib/terminal-store";
 import { ClaudeSession, SessionStatus, TerminalEntry, ViewMode } from "@/lib/types";
 
 const EMPTY_SET: Set<string> = new Set();
@@ -166,15 +166,43 @@ export default function Dashboard() {
         next.set(dir, { ...existing, sessionId: session.id });
         return next;
       }
-      // No terminal or previous one exited — create a fresh entry
-      const next = new Map(prev);
-      next.set(dir, {
+      // No terminal or previous one exited — create a fresh entry.
+      // Respect saved order: insert at the previously saved position.
+      const newEntry: TerminalEntry = {
         sessionId: session.id,
         workingDirectory: dir,
         ptyId: null,
         tmuxSession: session.tmuxSession ?? undefined,
         exited: false,
-      });
+      };
+      const savedOrder = getSavedTerminalOrder();
+      const savedIdx = savedOrder.indexOf(dir);
+      if (savedIdx === -1 || prev.size === 0) {
+        // No saved position or empty — just append
+        const next = new Map(prev);
+        next.set(dir, newEntry);
+        return next;
+      }
+      // Rebuild Map inserting at the saved position
+      const currentDirs = [...prev.keys()];
+      // Find the right insertion point: the first current dir whose saved index is > savedIdx
+      let insertBefore = -1;
+      for (let i = 0; i < currentDirs.length; i++) {
+        const ci = savedOrder.indexOf(currentDirs[i]);
+        if (ci > savedIdx) { insertBefore = i; break; }
+      }
+      const next = new Map<string, TerminalEntry>();
+      if (insertBefore === -1) {
+        // All current tabs were before this one in saved order — append
+        for (const [k, v] of prev) next.set(k, v);
+        next.set(dir, newEntry);
+      } else {
+        for (let i = 0; i < currentDirs.length; i++) {
+          if (i === insertBefore) next.set(dir, newEntry);
+          next.set(currentDirs[i], prev.get(currentDirs[i])!);
+        }
+        if (!next.has(dir)) next.set(dir, newEntry);
+      }
       return next;
     });
     setActiveTerminalDir(dir);

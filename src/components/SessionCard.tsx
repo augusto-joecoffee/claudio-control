@@ -240,7 +240,14 @@ export function SessionCard({
                     {shortcutNumber}
                   </span>
                 )}
-                <h3 className="font-semibold text-[15px] text-zinc-100 truncate group-hover:text-white transition-colors">
+                <h3
+                  title={session.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(session.id);
+                  }}
+                  className="font-semibold text-[15px] text-zinc-100 truncate group-hover:text-white transition-colors cursor-pointer"
+                >
                   {session.isWorktree && session.parentRepo
                     ? session.parentRepo.split("/").filter(Boolean).pop() || session.repoName
                     : session.repoName || "Unknown"}
@@ -281,6 +288,13 @@ export function SessionCard({
               {session.git && <GitSummary git={session.git} hideBranch={collapsed} />}
               {prStatus && <PrStatusBadge pr={prStatus} />}
             </div>
+          )}
+
+          {/* Initial prompt — always visible */}
+          {(session.initialPrompt || session.preview.lastUserMessage) && (
+            <p className="text-[11px] text-zinc-500 line-clamp-2 mb-2 leading-relaxed">
+              {session.initialPrompt || session.preview.lastUserMessage}
+            </p>
           )}
 
           {!collapsed && (

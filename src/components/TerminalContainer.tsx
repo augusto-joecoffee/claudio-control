@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -43,23 +43,36 @@ function SortableTab({
   };
 
   return (
-    <button
+    <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      onClick={() => onSwitch(id)}
-      onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id); } }}
-      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-(family-name:--font-geist-mono) whitespace-nowrap transition-colors cursor-grab active:cursor-grabbing ${
+      className={`flex items-center gap-1 rounded-md text-[11px] font-(family-name:--font-geist-mono) whitespace-nowrap transition-colors ${
         active
           ? "bg-white/8 text-zinc-300 border border-white/10"
           : "text-zinc-600 hover:text-zinc-400 hover:bg-white/4"
       }`}
     >
-      {!minimized && terminalIcon}
-      {label}
-      {exited && <span className="text-zinc-700 ml-1">(ended)</span>}
-    </button>
+      <button
+        {...attributes}
+        {...listeners}
+        onClick={() => onSwitch(id)}
+        onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id); } }}
+        className="flex items-center gap-1.5 pl-2 py-0.5 pr-1 cursor-grab active:cursor-grabbing"
+      >
+        {!minimized && terminalIcon}
+        {label}
+        {exited && <span className="text-zinc-700 ml-1">(ended)</span>}
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(id); }}
+        className="flex items-center justify-center w-4 h-4 mr-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/10 transition-colors"
+        title="Close terminal"
+      >
+        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -89,6 +102,7 @@ export function TerminalContainer({
   onPtyExited: (dir: string) => void;
 }) {
   const entries = Array.from(terminals.entries());
+  const [confirmCloseAll, setConfirmCloseAll] = useState(false);
   const tabIds = entries.map(([dir]) => dir);
 
   const sensors = useSensors(
@@ -164,17 +178,37 @@ export function TerminalContainer({
               </svg>
             </button>
           )}
-          {/* Close button */}
-          {activeDir && (
+          {/* Close all button */}
+          {entries.length > 0 && !confirmCloseAll && (
             <button
-              onClick={() => onClose(activeDir)}
+              onClick={() => {
+                if (entries.length === 1) { onClose(entries[0][0]); }
+                else { setConfirmCloseAll(true); }
+              }}
               className="flex items-center justify-center w-6 h-6 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors"
-              title="Close terminal"
+              title={entries.length === 1 ? "Close terminal" : "Close all terminals"}
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+          )}
+          {confirmCloseAll && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500">Close all?</span>
+              <button
+                onClick={() => { entries.forEach(([dir]) => onClose(dir)); setConfirmCloseAll(false); }}
+                className="px-1.5 py-0.5 rounded text-[10px] text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 transition-colors"
+              >
+                Yes
+              </button>
+              <button
+                onClick={() => setConfirmCloseAll(false)}
+                className="px-1.5 py-0.5 rounded text-[10px] text-zinc-500 hover:text-zinc-300 bg-white/4 hover:bg-white/8 transition-colors"
+              >
+                No
+              </button>
+            </div>
           )}
         </div>
       </div>

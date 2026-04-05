@@ -49,6 +49,8 @@ export function mapKeystrokeToSystemEvents(keystroke: string): string {
       return `key code 48`;
     case "space":
       return `keystroke " "`;
+    case "C-u":
+      return `keystroke "u" using control down`;
     default:
       return `keystroke "${keystroke.replace(/"/g, '\\"')}"`;
   }
