@@ -21,6 +21,7 @@ import { FlowStepViewer } from "@/components/review/FlowStepViewer";
 import { useBehaviors } from "@/hooks/useBehaviors";
 import { useBehaviorDetail } from "@/hooks/useBehaviorDetail";
 import { useFlowReviewProgress } from "@/hooks/useFlowReviewProgress";
+import { isOrphanBehaviorId } from "@/lib/behavior/orphaned";
 
 export default function ReviewPage() {
 	const params = useParams();
@@ -70,7 +71,14 @@ export default function ReviewPage() {
 
 	const { behaviors, orphanedSymbols, warnings: behaviorWarnings, isLoading: behaviorsLoading, isAnalyzing } = useBehaviors(sessionId, isBehaviorMode);
 	const { behavior: selectedBehavior, isLoading: behaviorDetailLoading } = useBehaviorDetail(sessionId, isBehaviorMode ? selectedBehaviorId : null);
-	const { isReviewed: isFlowReviewed, toggleReviewed: toggleFlowReviewed, reviewedCount: flowReviewedCount } = useFlowReviewProgress(sessionId);
+	const selectedBehaviorIsOrphan = isOrphanBehaviorId(selectedBehaviorId);
+	const {
+		isReviewed: isFlowReviewed,
+		toggleReviewed: toggleFlowReviewed,
+		reviewedCount: flowReviewedCount,
+		isStepReviewed,
+		toggleStepReviewed,
+	} = useFlowReviewProgress(sessionId, behaviors);
 
 	const pendingSnippetRef = useRef("");
 
@@ -377,6 +385,10 @@ export default function ReviewPage() {
 						<FlowStepViewer
 							behavior={selectedBehavior}
 							comments={comments}
+							isFlowReviewed={selectedBehaviorIsOrphan ? undefined : isFlowReviewed(selectedBehavior.id)}
+							onToggleFlowReviewed={selectedBehaviorIsOrphan ? undefined : toggleFlowReviewed}
+							isStepReviewed={selectedBehaviorIsOrphan ? undefined : isStepReviewed}
+							onToggleStepReviewed={selectedBehaviorIsOrphan ? undefined : toggleStepReviewed}
 							activeCommentLocation={activeComment}
 							onGutterClick={handleGutterClick}
 							onSubmitComment={handleSubmitComment}
@@ -391,17 +403,17 @@ export default function ReviewPage() {
 					) : (
 						<div className="flex-1 flex items-center justify-center text-zinc-600">
 							<div className="text-center">
-								{behaviorsLoading || isAnalyzing ? (
+								{behaviorsLoading || isAnalyzing || (selectedBehaviorId && behaviorDetailLoading) ? (
 									<>
 										<div className="w-5 h-5 mx-auto mb-2 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
-										<div className="text-xs">{isAnalyzing ? "Claude is analyzing the code flows..." : "Loading..."}</div>
-										{isAnalyzing && <div className="text-[10px] text-zinc-700 mt-1">This may take 15-30 seconds</div>}
+										<div className="text-xs">{isAnalyzing ? "Analyzing code flows..." : "Loading..."}</div>
+										{isAnalyzing && <div className="text-[10px] text-zinc-700 mt-1">This may take a moment</div>}
 									</>
-								) : behaviors.length > 0 ? (
+								) : behaviors.length > 0 || orphanedSymbols.length > 0 ? (
 									<>
-										<div className="text-sm mb-1">Select a flow</div>
+										<div className="text-sm mb-1">Select a flow or untraced change</div>
 										<div className="text-[11px] text-zinc-700">
-											{behaviors.length} flow{behaviors.length !== 1 ? "s" : ""} detected in this diff
+											{behaviors.length} flow{behaviors.length !== 1 ? "s" : ""} and {orphanedSymbols.length} change{orphanedSymbols.length !== 1 ? "s" : ""} without flow detected
 										</div>
 									</>
 								) : (

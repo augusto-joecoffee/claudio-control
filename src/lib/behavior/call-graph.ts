@@ -116,6 +116,12 @@ function resolveCallTarget(
 	const isAsync = call.getParent()?.getKind() === SyntaxKind.AwaitExpression
 		|| (call as any).getExpression?.()?.getText?.()?.includes(".then") === true;
 
+	// Strategy 0: "Go to definition" can jump through barrel exports/re-exports.
+	const definitionTarget = resolveDefinitionTarget(expr, graph, cwd);
+	if (definitionTarget) {
+		return { targetId: definitionTarget, confidence: "high", isAsync };
+	}
+
 	// Strategy 1: getSymbol() on the expression
 	let tsSym = expr.getSymbol?.() ?? null;
 
@@ -193,6 +199,64 @@ function resolveCallTarget(
 		}
 	}
 
+	return null;
+}
+
+function resolveDefinitionTarget(
+	expr: Node,
+	graph: SemanticCodeGraph,
+	cwd: string,
+): SymbolId | null {
+	try {
+		const definitionNodes = (expr as any).getDefinitionNodes?.() as Node[] | undefined;
+		if (!definitionNodes) return null;
+		for (const defNode of definitionNodes) {
+			const targetId = resolveDeclarationNodeTarget(defNode, graph, cwd);
+			if (targetId) return targetId;
+		}
+	} catch { /* definition lookup can fail */ }
+
+	return null;
+}
+
+function resolveDeclarationNodeTarget(
+	decl: Node,
+	graph: SemanticCodeGraph,
+	cwd: string,
+): SymbolId | null {
+	const declFile = decl.getSourceFile().getFilePath();
+	if (declFile.includes("/node_modules/")) return null;
+
+	const relPath = makeRelative(declFile, cwd);
+	if (relPath.startsWith("/")) return null;
+
+	const symbol = decl.getSymbol?.() ?? null;
+	const declName = symbol?.getName() ?? getDeclarationName(decl);
+	if (!declName || declName === "__function" || declName === "__object") return null;
+
+	const parentClass = getParentClassName(decl);
+	const qualifiedName = parentClass ? `${parentClass}.${declName}` : declName;
+	const exactId = makeSymbolId(relPath, qualifiedName);
+
+	if (graph.nodes.has(exactId)) return exactId;
+
+	for (const [id, node] of graph.nodes) {
+		if (node.filePath === relPath && (node.qualifiedName === qualifiedName || node.name === declName)) {
+			return id;
+		}
+	}
+
+	return null;
+}
+
+function getDeclarationName(node: Node): string | null {
+	if (Node.isFunctionDeclaration(node) || Node.isClassDeclaration(node) || Node.isVariableDeclaration(node) || Node.isMethodDeclaration(node)) {
+		return node.getName() ?? null;
+	}
+	if (Node.isFunctionExpression(node) || Node.isArrowFunction(node)) {
+		const varDecl = node.getFirstAncestorByKind(SyntaxKind.VariableDeclaration);
+		return varDecl?.getName() ?? null;
+	}
 	return null;
 }
 

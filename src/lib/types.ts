@@ -312,6 +312,10 @@ export interface CodeSnippet {
 
 export interface ExecutionStep {
   id: string;
+  /** Stable identity for this reviewable unit (usually filePath::qualifiedName). */
+  key: string;
+  /** Changes whenever the function/block content being reviewed changes. */
+  fingerprint: string;
   order: number;
   symbol: ChangedSymbol;
   snippet: CodeSnippet;
@@ -329,8 +333,13 @@ export interface ExecutionStep {
 
 export interface ChangedBehavior {
   id: string;
+  /** Stable identity for this flow. */
+  key: string;
+  /** Changes whenever the flow composition or any included step changes. */
+  fingerprint: string;
   /** Human-readable name: "POST /api/users → createUser". */
   name: string;
+  reviewCategory: "new" | "modified" | "impacted";
   entrypointKind: EntrypointKind;
   entrypoint: ChangedSymbol;
   steps: ExecutionStep[];
@@ -346,6 +355,7 @@ export interface ChangedBehavior {
 
 export interface BehaviorAnalysis {
   sessionId: string;
+  analysisVersion: number;
   /** Diff fingerprint at time of analysis, for cache invalidation. */
   diffFingerprint: string;
   behaviors: ChangedBehavior[];

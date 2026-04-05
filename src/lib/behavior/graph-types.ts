@@ -144,6 +144,7 @@ export interface ImpactGraph {
 export interface ReviewerFlow {
 	entrypoint: SymbolNode;
 	entrypointKind: EntrypointKind;
+	reviewCategory: "new" | "modified" | "impacted";
 	steps: FlowStep[];
 	sideEffects: SideEffect[];
 	touchedFiles: string[];

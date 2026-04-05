@@ -66,6 +66,7 @@ export function getProjectAndGraph(
 
 	// Cache miss — build from scratch
 	const project = loadProject(cwd, changedFilePaths);
+	ensureChangedFilesLoaded(project, cwd, changedFilePaths);
 	const graph = buildFullGraph(project, cwd);
 
 	cache = { cwd, project, graph, createdAt: now };
@@ -104,6 +105,20 @@ function loadProject(cwd: string, changedFilePaths?: string[]): Project {
 	});
 	project.addSourceFilesAtPaths(join(cwd, "src/**/*.{ts,tsx,js,jsx}"));
 	return project;
+}
+
+function ensureChangedFilesLoaded(project: Project, cwd: string, changedFilePaths?: string[]): void {
+	if (!changedFilePaths) return;
+
+	for (const relPath of changedFilePaths) {
+		const absPath = resolve(cwd, relPath);
+		if (project.getSourceFile(absPath)) continue;
+		try {
+			project.addSourceFileAtPath(absPath);
+		} catch {
+			// The changed file may have been deleted or may not be a supported source file.
+		}
+	}
 }
 
 /**
@@ -237,6 +252,8 @@ function indexFile(sourceFile: SourceFile, relPath: string, graph: SemanticCodeG
 				if (!init) continue;
 				if (Node.isArrowFunction(init) || Node.isFunctionExpression(init)) {
 					addSymbolNode(graph, varDecl, varDecl.getName(), "function", relPath, null);
+				} else if (isWrappedFunctionInitializer(init)) {
+					addSymbolNode(graph, varDecl, varDecl.getName(), "function", relPath, null);
 				} else if (Node.isObjectLiteralExpression(init)) {
 					addSymbolNode(graph, varDecl, varDecl.getName(), "export", relPath, null);
 				}
@@ -308,6 +325,8 @@ function classifyEntrypoint(
 	node: Node,
 	isExported: boolean,
 ): EntrypointKind | null {
+	const text = node.getText();
+
 	// Next.js App Router routes
 	if (/\/app\/.*\/route\.(ts|js|tsx|jsx)$/.test(filePath) && /^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)$/.test(name)) {
 		return "api-route";
@@ -340,8 +359,8 @@ function classifyEntrypoint(
 
 	// Express/Koa routes
 	if (isExported && kind === "function") {
-		const text = node.getText();
 		if (/\b(app|router)\.(get|post|put|delete|patch|use)\s*\(/.test(text)) return "api-route";
+		if (/\b(get|post|put|delete|patch|head|options)Endpoint\s*\(/i.test(text)) return "api-route";
 	}
 
 	// Exported functions in service/controller/handler files
@@ -359,6 +378,21 @@ function isExported(node: Node): boolean {
 		const varStmt = parent.getParent();
 		if (varStmt && Node.isVariableStatement(varStmt)) return varStmt.isExported();
 	}
+	return false;
+}
+
+function isWrappedFunctionInitializer(node: Node): boolean {
+	if (!Node.isCallExpression(node)) return false;
+
+	for (const arg of node.getArguments()) {
+		if (Node.isArrowFunction(arg) || Node.isFunctionExpression(arg)) return true;
+		if (Node.isArrayLiteralExpression(arg)) {
+			for (const element of arg.getElements()) {
+				if (Node.isArrowFunction(element) || Node.isFunctionExpression(element)) return true;
+			}
+		}
+	}
+
 	return false;
 }
 

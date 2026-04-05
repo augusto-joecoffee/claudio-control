@@ -1,91 +1,101 @@
 /**
- * Layer 4: Behavior Flow Derivation (Change-Centric)
+ * Layer 4: Behavior Flow Derivation (Path-Shaped, Change-Focused)
  *
- * Produces reviewer flows centered on WHAT CHANGED, not what's affected.
+ * Produces deterministic reviewer flows with this model:
+ *   - One flow per impacted entrypoint + related changed component
+ *   - Steps are function-level review units
+ *   - Changed steps are shown fully; unchanged steps remain as path context
  *
- * Strategy:
- *   1. Group changed symbols by file proximity and call relationship
- *   2. For each group, build a flow:
- *      - Context: nearest entrypoint (1 step, for orientation)
- *      - Core: the changed code in execution order
- *      - Consequences: downstream side effects
- *   3. Name the flow after the primary change, not every possible caller
+ * The output is still reviewer-oriented, but the underlying shape is a
+ * concrete call path rather than a file-centric grouping.
  */
 
 import type { EntrypointKind, ConfidenceLevel, SideEffect } from "../types";
 import type {
 	ImpactGraph, SemanticCodeGraph, SymbolId, SymbolNode,
-	ReviewerFlow, FlowStep, GraphEdge, DiffAnchor,
+	ReviewerFlow, FlowStep,
 } from "./graph-types";
-import { parseSymbolId } from "./graph-types";
 
-const MAX_DOWNSTREAM_DEPTH = 6;
-const MAX_DISPLAY_STEPS = 20;
+const MAX_UPSTREAM_HOPS = 6;
+const MAX_DOWNSTREAM_HOPS = 6;
+const MAX_ENTRYPOINTS_PER_GROUP = 5;
+const MAX_DOWNSTREAM_TARGETS_PER_MEMBER = 6;
+const MAX_DISPLAY_STEPS = 24;
 
 // ── Public API ──
 
-/**
- * Derive reviewer flows centered on what the PR actually changes.
- * Groups related changes, then builds a flow per group showing:
- * context entrypoint → changed code → downstream consequences.
- */
 export function deriveFlows(
 	impact: ImpactGraph,
 	fullGraph: SemanticCodeGraph,
 ): { flows: ReviewerFlow[]; orphanedSymbolIds: SymbolId[] } {
-	// Step 1: Group changed symbols into coherent behaviors
 	const groups = groupChangedSymbols(impact, fullGraph);
-
-	// Step 2: Build a flow per group
 	const flows: ReviewerFlow[] = [];
 	const tracedSymbols = new Set<SymbolId>();
 
 	for (const group of groups) {
-		const flow = buildChangeFlow(group, impact, fullGraph);
-		if (!flow || flow.steps.length === 0) continue;
-		flows.push(flow);
-		for (const step of flow.steps) {
-			tracedSymbols.add(step.node.id);
+		const { plans: entrypointPlans, rootedMembers } = findEntrypointPlans(group.members, fullGraph);
+		const coveredMembers = new Set<SymbolId>();
+
+		if (entrypointPlans.length === 0) {
+			const flow = buildFlowForPlan({ entrypointId: null, memberPaths: new Map(), minDepth: 0 }, group, impact, fullGraph);
+			if (flow) {
+				flows.push(flow);
+				for (const step of flow.steps) {
+					if (step.isChanged) tracedSymbols.add(step.node.id);
+				}
+			}
+			continue;
+		}
+
+		for (const plan of entrypointPlans) {
+			for (const memberId of plan.memberPaths.keys()) coveredMembers.add(memberId);
+			const flow = buildFlowForPlan(plan, group, impact, fullGraph);
+			if (!flow) continue;
+			flows.push(flow);
+			for (const step of flow.steps) {
+				if (step.isChanged) tracedSymbols.add(step.node.id);
+			}
+		}
+
+		for (const memberId of group.members) {
+			if (coveredMembers.has(memberId) || rootedMembers.has(memberId) || !shouldCreateSelfRootFlow(memberId, impact, fullGraph)) continue;
+			const flow = buildFlowForPlan(
+				{ entrypointId: null, memberPaths: new Map([[memberId, [memberId]]]), minDepth: 0 },
+				{ primary: memberId, members: [memberId] },
+				impact,
+				fullGraph,
+			);
+			if (!flow) continue;
+			flows.push(flow);
+			for (const step of flow.steps) {
+				if (step.isChanged) tracedSymbols.add(step.node.id);
+			}
 		}
 	}
 
-	// Orphaned: changed symbols not in any flow
-	const orphanedSymbolIds: SymbolId[] = [];
-	for (const [id] of impact.changed) {
-		if (!tracedSymbols.has(id)) {
-			orphanedSymbolIds.push(id);
-		}
-	}
+	flows.sort((a, b) => {
+		const categoryDiff = compareFlowReviewCategory(a.reviewCategory, b.reviewCategory);
+		if (categoryDiff !== 0) return categoryDiff;
+		const changedDiff = b.steps.filter((step) => step.isChanged).length - a.steps.filter((step) => step.isChanged).length;
+		if (changedDiff !== 0) return changedDiff;
+		return a.name.localeCompare(b.name);
+	});
 
+	const orphanedSymbolIds = Array.from(impact.changed.keys()).filter((id) => !tracedSymbols.has(id));
 	return { flows, orphanedSymbolIds };
 }
 
 // ── Change Grouping ──
 
 interface ChangeGroup {
-	/** Primary changed symbol (the "lead" of this group). */
 	primary: SymbolId;
-	/** All changed symbols in this group. */
 	members: SymbolId[];
-	/** Nearest entrypoint for context (if found). */
-	entrypointId: SymbolId | null;
-	/** The file that most members belong to. */
-	primaryFile: string;
 }
 
-/**
- * Group changed symbols into coherent behaviors.
- *
- * Grouping rules:
- * - Changed symbols in the same file → same group
- * - Changed symbols that call each other (connected via edges) → merge groups
- * - Changed symbols that share the same nearest entrypoint → merge groups
- */
 function groupChangedSymbols(impact: ImpactGraph, fullGraph: SemanticCodeGraph): ChangeGroup[] {
 	const changedIds = Array.from(impact.changed.keys());
 	if (changedIds.length === 0) return [];
 
-	// Union-Find for grouping
 	const parent = new Map<SymbolId, SymbolId>();
 	for (const id of changedIds) parent.set(id, id);
 
@@ -97,106 +107,57 @@ function groupChangedSymbols(impact: ImpactGraph, fullGraph: SemanticCodeGraph):
 		}
 		return x;
 	}
+
 	function union(a: SymbolId, b: SymbolId) {
-		const ra = find(a), rb = find(b);
+		const ra = find(a);
+		const rb = find(b);
 		if (ra !== rb) parent.set(ra, rb);
 	}
 
-	// Rule 1: Same file → merge
 	const byFile = new Map<string, SymbolId[]>();
 	for (const id of changedIds) {
-		const node = impact.changed.get(id)?.resolvedNode;
+		const node = impact.changed.get(id)?.resolvedNode ?? fullGraph.nodes.get(id);
 		if (!node) continue;
 		const list = byFile.get(node.filePath) ?? [];
 		list.push(id);
 		byFile.set(node.filePath, list);
 	}
-	for (const [, ids] of byFile) {
-		for (let i = 1; i < ids.length; i++) {
-			union(ids[0], ids[i]);
-		}
+
+	for (const ids of byFile.values()) {
+		for (let i = 1; i < ids.length; i++) union(ids[0], ids[i]);
 	}
 
-	// Rule 2: Call each other → merge
 	const changedSet = new Set(changedIds);
-	for (const edge of impact.edges) {
-		if (changedSet.has(edge.from) && changedSet.has(edge.to)) {
-			union(edge.from, edge.to);
-		}
-	}
-	// Also check full graph edges between changed symbols
 	for (const id of changedIds) {
-		const outEdges = fullGraph.outbound.get(id) ?? [];
-		for (const edge of outEdges) {
+		for (const edge of fullGraph.outbound.get(id) ?? []) {
 			if (changedSet.has(edge.to)) union(id, edge.to);
 		}
-	}
-
-	// Rule 3: Share nearest entrypoint → merge
-	const byEntrypoint = new Map<SymbolId, SymbolId[]>();
-	for (const id of changedIds) {
-		const ep = impact.nearestEntrypoints.get(id);
-		if (!ep) continue;
-		const list = byEntrypoint.get(ep) ?? [];
-		list.push(id);
-		byEntrypoint.set(ep, list);
-	}
-	for (const [, ids] of byEntrypoint) {
-		for (let i = 1; i < ids.length; i++) {
-			union(ids[0], ids[i]);
+		for (const edge of fullGraph.inbound.get(id) ?? []) {
+			if (changedSet.has(edge.from)) union(id, edge.from);
 		}
 	}
 
-	// Collect groups
-	const groupMap = new Map<SymbolId, SymbolId[]>();
+	const groups = new Map<SymbolId, SymbolId[]>();
 	for (const id of changedIds) {
 		const root = find(id);
-		const list = groupMap.get(root) ?? [];
+		const list = groups.get(root) ?? [];
 		list.push(id);
-		groupMap.set(root, list);
+		groups.set(root, list);
 	}
 
-	// Build ChangeGroup objects
-	const groups: ChangeGroup[] = [];
-	for (const [, members] of groupMap) {
-		// Pick primary: prefer entrypoints, then most-changed, then first
-		const primary = pickPrimary(members, impact, fullGraph);
-
-		// Find nearest entrypoint for any member
-		let entrypointId: SymbolId | null = null;
-		for (const id of members) {
-			const ep = impact.nearestEntrypoints.get(id);
-			if (ep) { entrypointId = ep; break; }
-		}
-
-		// Primary file: most common file in the group
-		const fileCounts = new Map<string, number>();
-		for (const id of members) {
-			const node = impact.changed.get(id)?.resolvedNode;
-			if (node) fileCounts.set(node.filePath, (fileCounts.get(node.filePath) ?? 0) + 1);
-		}
-		let primaryFile = "";
-		let maxCount = 0;
-		for (const [f, c] of fileCounts) {
-			if (c > maxCount) { maxCount = c; primaryFile = f; }
-		}
-
-		groups.push({ primary, members, entrypointId, primaryFile });
-	}
-
-	// Sort: largest groups first (most important changes)
-	groups.sort((a, b) => b.members.length - a.members.length);
-
-	return groups;
+	return Array.from(groups.values())
+		.map((members) => ({
+			primary: pickPrimary(members, impact, fullGraph),
+			members: members.sort(),
+		}))
+		.sort((a, b) => b.members.length - a.members.length);
 }
 
 function pickPrimary(members: SymbolId[], impact: ImpactGraph, fullGraph: SemanticCodeGraph): SymbolId {
-	// Prefer a member that IS an entrypoint
 	for (const id of members) {
 		const node = impact.changed.get(id)?.resolvedNode ?? fullGraph.nodes.get(id);
 		if (node?.entrypointKind) return id;
 	}
-	// Prefer a member that is exported
 	for (const id of members) {
 		const node = impact.changed.get(id)?.resolvedNode ?? fullGraph.nodes.get(id);
 		if (node?.isExported) return id;
@@ -204,210 +165,453 @@ function pickPrimary(members: SymbolId[], impact: ImpactGraph, fullGraph: Semant
 	return members[0];
 }
 
+// ── Entrypoint Planning ──
+
+interface EntrypointPlan {
+	entrypointId: SymbolId | null;
+	memberPaths: Map<SymbolId, SymbolId[]>;
+	minDepth: number;
+}
+
+interface EntrypointPlanningResult {
+	plans: EntrypointPlan[];
+	rootedMembers: Set<SymbolId>;
+}
+
+function findEntrypointPlans(members: SymbolId[], fullGraph: SemanticCodeGraph): EntrypointPlanningResult {
+	const planMap = new Map<SymbolId, EntrypointPlan>();
+
+	for (const memberId of members) {
+		const paths = findUpstreamEntrypointPaths(memberId, fullGraph, MAX_UPSTREAM_HOPS);
+		for (const path of paths) {
+			const existing = planMap.get(path.entrypointId) ?? {
+				entrypointId: path.entrypointId,
+				memberPaths: new Map<SymbolId, SymbolId[]>(),
+				minDepth: path.path.length,
+			};
+
+			const previousPath = existing.memberPaths.get(memberId);
+			if (!previousPath || path.path.length < previousPath.length) {
+				existing.memberPaths.set(memberId, path.path);
+			}
+			existing.minDepth = Math.min(existing.minDepth, path.path.length);
+			planMap.set(path.entrypointId, existing);
+		}
+	}
+
+	const rankedPlans = Array.from(planMap.values()).sort(compareEntrypointPlans);
+	const rootedMembers = new Set<SymbolId>();
+	for (const plan of rankedPlans) {
+		for (const memberId of plan.memberPaths.keys()) rootedMembers.add(memberId);
+	}
+
+	const planBudget = Math.max(MAX_ENTRYPOINTS_PER_GROUP, rootedMembers.size);
+	const selected: EntrypointPlan[] = [];
+	const coveredMembers = new Set<SymbolId>();
+	const remaining = [...rankedPlans];
+
+	while (selected.length < planBudget && coveredMembers.size < rootedMembers.size) {
+		let bestIndex = -1;
+		let bestGain = 0;
+
+		for (let i = 0; i < remaining.length; i++) {
+			const gain = countNewCoverage(remaining[i], coveredMembers);
+			if (gain === 0) continue;
+			if (gain > bestGain) {
+				bestGain = gain;
+				bestIndex = i;
+			}
+		}
+
+		if (bestIndex === -1) break;
+
+		const [plan] = remaining.splice(bestIndex, 1);
+		selected.push(plan);
+		for (const memberId of plan.memberPaths.keys()) coveredMembers.add(memberId);
+	}
+
+	while (selected.length < planBudget && remaining.length > 0) {
+		selected.push(remaining.shift()!);
+	}
+
+	return {
+		plans: selected.sort(compareEntrypointPlans),
+		rootedMembers,
+	};
+}
+
+function findUpstreamEntrypointPaths(
+	startId: SymbolId,
+	fullGraph: SemanticCodeGraph,
+	maxHops: number,
+): Array<{ entrypointId: SymbolId; path: SymbolId[] }> {
+	const startNode = fullGraph.nodes.get(startId);
+	if (!startNode) return [];
+	if (startNode.entrypointKind) return [{ entrypointId: startId, path: [startId] }];
+
+	const results = new Map<SymbolId, SymbolId[]>();
+	const queue: Array<{ nodeId: SymbolId; path: SymbolId[]; depth: number }> = [{ nodeId: startId, path: [startId], depth: 0 }];
+	const visitedDepth = new Map<SymbolId, number>([[startId, 0]]);
+
+	while (queue.length > 0) {
+		const current = queue.shift()!;
+		if (current.depth >= maxHops) continue;
+
+		for (const edge of fullGraph.inbound.get(current.nodeId) ?? []) {
+			const callerId = edge.from;
+			const nextDepth = current.depth + 1;
+			const prevDepth = visitedDepth.get(callerId);
+			if (prevDepth !== undefined && prevDepth < nextDepth) continue;
+			visitedDepth.set(callerId, nextDepth);
+
+			const nextPath = [callerId, ...current.path];
+			const callerNode = fullGraph.nodes.get(callerId);
+			if (!callerNode) continue;
+
+			if (callerNode.entrypointKind) {
+				const existing = results.get(callerId);
+				if (!existing || nextPath.length < existing.length) results.set(callerId, nextPath);
+				continue;
+			}
+
+			queue.push({ nodeId: callerId, path: nextPath, depth: nextDepth });
+		}
+	}
+
+	return Array.from(results.entries()).map(([entrypointId, path]) => ({ entrypointId, path }));
+}
+
+function compareEntrypointPlans(a: EntrypointPlan, b: EntrypointPlan): number {
+	if (a.minDepth !== b.minDepth) return a.minDepth - b.minDepth;
+	if (a.memberPaths.size !== b.memberPaths.size) return b.memberPaths.size - a.memberPaths.size;
+	return (a.entrypointId ?? "").localeCompare(b.entrypointId ?? "");
+}
+
+function countNewCoverage(plan: EntrypointPlan, coveredMembers: Set<SymbolId>): number {
+	let count = 0;
+	for (const memberId of plan.memberPaths.keys()) {
+		if (!coveredMembers.has(memberId)) count++;
+	}
+	return count;
+}
+
 // ── Flow Building ──
 
-/**
- * Build a single flow for a change group.
- *
- * Structure:
- *   [Context: nearest entrypoint] → [Changed code in order] → [Downstream side effects]
- */
-function buildChangeFlow(
+function buildFlowForPlan(
+	plan: EntrypointPlan,
 	group: ChangeGroup,
 	impact: ImpactGraph,
 	fullGraph: SemanticCodeGraph,
 ): ReviewerFlow | null {
-	const steps: FlowStep[] = [];
+	const includedMemberIds = plan.memberPaths.size > 0
+		? Array.from(plan.memberPaths.keys()).sort()
+		: group.members;
+	const primaryMemberId = includedMemberIds.includes(group.primary) ? group.primary : includedMemberIds[0] ?? group.primary;
+	const primaryNode = impact.changed.get(primaryMemberId)?.resolvedNode ?? fullGraph.nodes.get(primaryMemberId);
+	if (!primaryNode) return null;
 
-	// Step 0 (optional): Nearest entrypoint as context
-	let entrypointNode: SymbolNode | null = null;
-	let entrypointKind: EntrypointKind = "exported-function";
+	const entrypointNode = plan.entrypointId
+		? fullGraph.nodes.get(plan.entrypointId) ?? primaryNode
+		: primaryNode;
+	const entrypointKind = entrypointNode.entrypointKind ?? "exported-function";
+	const reviewCategory = classifyFlowReviewCategory(plan, includedMemberIds, impact, fullGraph);
 
-	if (group.entrypointId) {
-		const epNode = fullGraph.nodes.get(group.entrypointId);
-		if (epNode) {
-			entrypointNode = epNode;
-			entrypointKind = epNode.entrypointKind ?? "exported-function";
+	const seeds = new Map<SymbolId, { node: SymbolNode; order: number; rationale: string; confidence: ConfidenceLevel }>();
+	const supplementalSideEffects: SideEffect[] = [];
+	const supplementalTouchedFiles = new Set<string>();
 
-			// Only add as a step if it's not already a changed member
-			if (!group.members.includes(group.entrypointId)) {
-				steps.push({
-					node: epNode,
-					order: 0,
-					sideEffects: epNode.sideEffects,
-					callsTo: (fullGraph.outbound.get(group.entrypointId) ?? []).map((e) => e.to),
-					isChanged: false,
-					changeKind: null,
-					changedRanges: [],
-					rationale: "Entry point (context)",
-					confidence: "high",
-				});
+	const upsertSeed = (
+		nodeId: SymbolId,
+		order: number,
+		rationale: string,
+		confidence: ConfidenceLevel,
+	) => {
+		const node = fullGraph.nodes.get(nodeId) ?? impact.changed.get(nodeId)?.resolvedNode;
+		if (!node) return;
+
+		const existing = seeds.get(nodeId);
+		const next = {
+			node,
+			order,
+			rationale: pickRationale(existing?.rationale, rationale),
+			confidence: minConfidence(existing?.confidence ?? confidence, confidence),
+		};
+
+		if (!existing || order < existing.order || next.rationale !== existing.rationale || next.confidence !== existing.confidence) {
+			seeds.set(nodeId, next);
+		}
+	};
+
+	if (plan.memberPaths.size > 0) {
+		for (const [memberId, path] of plan.memberPaths) {
+			for (let i = 0; i < path.length; i++) {
+				const nodeId = path[i];
+				const node = fullGraph.nodes.get(nodeId) ?? impact.changed.get(nodeId)?.resolvedNode;
+				if (!node) continue;
+				if (i === 0 && node.entrypointKind) {
+					upsertSeed(nodeId, i, "Entry point", "high");
+				} else if (impact.changed.has(nodeId)) {
+					upsertSeed(nodeId, i, "Modified by this diff", impact.changed.get(nodeId)?.confidence ?? "medium");
+				} else {
+					upsertSeed(nodeId, i, "Calls changed code", "high");
+				}
+			}
+			if (!path.includes(memberId)) {
+				upsertSeed(memberId, path.length, "Modified by this diff", impact.changed.get(memberId)?.confidence ?? "medium");
+			}
+		}
+	} else {
+		for (const memberId of includedMemberIds) {
+			upsertSeed(memberId, seeds.size, "Modified by this diff", impact.changed.get(memberId)?.confidence ?? "medium");
+		}
+	}
+
+	for (const memberId of includedMemberIds) {
+		const downstreamPaths = findDownstreamPaths(memberId, fullGraph, impact, MAX_DOWNSTREAM_HOPS);
+		for (const path of downstreamPaths) {
+			for (let i = 1; i < path.length; i++) {
+				const nodeId = path[i];
+				const node = fullGraph.nodes.get(nodeId);
+				if (!node) continue;
+				const shouldShowDirectContext = i === 1 &&
+					path.length === 2 &&
+					isChangedCallsiteTarget(memberId, nodeId, impact, fullGraph);
+				if (!impact.changed.has(nodeId) && node.sideEffects.length > 0 && !shouldShowDirectContext) {
+					for (const effect of node.sideEffects) supplementalSideEffects.push(effect);
+					supplementalTouchedFiles.add(node.filePath);
+					continue;
+				}
+				if (!impact.changed.has(nodeId) && node.sideEffects.length === 0 && !shouldShowDirectContext) {
+					continue;
+				}
+				const order = 100 + i + (seeds.get(memberId)?.order ?? 0);
+				if (impact.changed.has(nodeId)) {
+					upsertSeed(nodeId, order, "Modified by this diff", impact.changed.get(nodeId)?.confidence ?? "medium");
+				} else if (shouldShowDirectContext) {
+					upsertSeed(nodeId, order, "Touched by changed call site", "high");
+				} else {
+					upsertSeed(nodeId, order, "On execution path", "medium");
+				}
 			}
 		}
 	}
 
-	// Core: Changed symbols in this group, ordered by file then line number
-	const changedNodes: Array<{ id: SymbolId; node: SymbolNode; anchor: DiffAnchor }> = [];
-	for (const id of group.members) {
-		const anchor = impact.changed.get(id);
-		const node = anchor?.resolvedNode ?? fullGraph.nodes.get(id);
-		if (node && anchor) changedNodes.push({ id, node, anchor });
+	for (const memberId of includedMemberIds) {
+		if (!seeds.has(memberId)) {
+			upsertSeed(memberId, seeds.size, "Modified by this diff", impact.changed.get(memberId)?.confidence ?? "medium");
+		}
 	}
 
-	// Sort by file path then line number (approximation of execution order)
-	changedNodes.sort((a, b) => {
-		if (a.node.filePath !== b.node.filePath) return a.node.filePath.localeCompare(b.node.filePath);
-		return a.node.line - b.node.line;
+	const orderedSeeds = Array.from(seeds.entries())
+		.sort((a, b) => {
+			const [aId, aSeed] = a;
+			const [bId, bSeed] = b;
+			if (aSeed.order !== bSeed.order) return aSeed.order - bSeed.order;
+			if (impact.changed.has(aId) !== impact.changed.has(bId)) return impact.changed.has(aId) ? -1 : 1;
+			if (aSeed.node.filePath !== bSeed.node.filePath) return aSeed.node.filePath.localeCompare(bSeed.node.filePath);
+			return aSeed.node.line - bSeed.node.line;
+		})
+		.slice(0, MAX_DISPLAY_STEPS);
+
+	const includedIds = new Set(orderedSeeds.map(([id]) => id));
+	const steps: FlowStep[] = orderedSeeds.map(([nodeId, seed], index) => {
+		const anchor = impact.changed.get(nodeId);
+		return {
+			node: seed.node,
+			order: index,
+			sideEffects: seed.node.sideEffects,
+			callsTo: (fullGraph.outbound.get(nodeId) ?? [])
+				.map((edge) => edge.to)
+				.filter((targetId) => includedIds.has(targetId)),
+			isChanged: !!anchor,
+			changeKind: anchor?.changeKind ?? null,
+			changedRanges: anchor?.changedRanges ?? [],
+			rationale: seed.rationale,
+			confidence: anchor?.confidence ?? seed.confidence,
+		};
 	});
-
-	for (const { id, node, anchor } of changedNodes) {
-		steps.push({
-			node,
-			order: steps.length,
-			sideEffects: node.sideEffects,
-			callsTo: (fullGraph.outbound.get(id) ?? []).map((e) => e.to),
-			isChanged: true,
-			changeKind: anchor.changeKind,
-			changedRanges: anchor.changedRanges,
-			rationale: "Modified by this diff",
-			confidence: anchor.confidence,
-		});
-	}
-
-	// Downstream: Side effects reachable from changed code (not already in steps)
-	const stepIds = new Set(steps.map((s) => s.node.id));
-	const downstreamSteps = traceDownstreamSideEffects(group.members, stepIds, impact, fullGraph);
-	for (const ds of downstreamSteps) {
-		if (steps.length >= MAX_DISPLAY_STEPS) break;
-		steps.push({
-			...ds,
-			order: steps.length,
-		});
-	}
 
 	if (steps.length === 0) return null;
 
-	// If no entrypoint found, use the primary changed symbol
-	if (!entrypointNode) {
-		const primaryNode = impact.changed.get(group.primary)?.resolvedNode ?? fullGraph.nodes.get(group.primary);
-		if (!primaryNode) return null;
-		entrypointNode = primaryNode;
-		entrypointKind = primaryNode.entrypointKind ?? "exported-function";
-	}
-
-	// Aggregate
 	const sideEffectKeys = new Set<string>();
-	const aggregateSideEffects: SideEffect[] = [];
-	const touchedFiles = new Set<string>();
+	const sideEffects: SideEffect[] = [];
+	const touchedFiles = new Set<string>(supplementalTouchedFiles);
 
 	for (const step of steps) {
 		touchedFiles.add(step.node.filePath);
-		for (const se of step.sideEffects) {
-			const key = `${se.kind}:${se.description}`;
-			if (!sideEffectKeys.has(key)) {
-				sideEffectKeys.add(key);
-				aggregateSideEffects.push(se);
-			}
+		for (const effect of step.sideEffects) {
+			const key = `${effect.kind}:${effect.description}`;
+			if (sideEffectKeys.has(key)) continue;
+			sideEffectKeys.add(key);
+			sideEffects.push(effect);
 		}
 	}
+	for (const effect of supplementalSideEffects) {
+		const key = `${effect.kind}:${effect.description}`;
+		if (sideEffectKeys.has(key)) continue;
+		sideEffectKeys.add(key);
+		sideEffects.push(effect);
+	}
 
-	const confidence = steps.reduce<ConfidenceLevel>((acc, s) => {
-		const rank = { high: 2, medium: 1, low: 0 };
-		return rank[s.confidence] < rank[acc] ? s.confidence : acc;
-	}, "high");
+	const confidence = steps.reduce<ConfidenceLevel>((acc, step) => minConfidence(acc, step.confidence), "high");
 
 	return {
 		entrypoint: entrypointNode,
 		entrypointKind,
+		reviewCategory,
 		steps,
-		sideEffects: aggregateSideEffects,
+		sideEffects,
 		touchedFiles: Array.from(touchedFiles),
 		confidence,
-		name: nameFlow(group, impact, fullGraph),
+		name: nameFlow(plan.entrypointId ? entrypointNode : null, primaryNode, includedMemberIds.length),
 	};
 }
 
-// ── Downstream Side Effects ──
-
-function traceDownstreamSideEffects(
-	startIds: SymbolId[],
-	alreadyIncluded: Set<SymbolId>,
-	impact: ImpactGraph,
+function findDownstreamPaths(
+	startId: SymbolId,
 	fullGraph: SemanticCodeGraph,
-): FlowStep[] {
-	const results: FlowStep[] = [];
-	const visited = new Set<SymbolId>(alreadyIncluded);
-	let frontier = new Set(startIds.filter((id) => !visited.has(id)));
+	impact: ImpactGraph,
+	maxDepth: number,
+): SymbolId[][] {
+	const results = new Map<SymbolId, SymbolId[]>();
+	const queue: Array<{ nodeId: SymbolId; path: SymbolId[]; depth: number }> = [{ nodeId: startId, path: [startId], depth: 0 }];
+	const visitedDepth = new Map<SymbolId, number>([[startId, 0]]);
 
-	// Also start from already-included changed nodes
-	for (const id of startIds) frontier.add(id);
+	while (queue.length > 0) {
+		const current = queue.shift()!;
+		if (current.depth >= maxDepth) continue;
 
-	for (let depth = 0; depth < MAX_DOWNSTREAM_DEPTH && frontier.size > 0; depth++) {
-		const nextFrontier = new Set<SymbolId>();
-		for (const nodeId of frontier) {
-			const outEdges = fullGraph.outbound.get(nodeId) ?? [];
-			for (const edge of outEdges) {
-				if (visited.has(edge.to)) continue;
-				visited.add(edge.to);
+		for (const edge of fullGraph.outbound.get(current.nodeId) ?? []) {
+			const targetId = edge.to;
+			const nextDepth = current.depth + 1;
+			const prevDepth = visitedDepth.get(targetId);
+			if (prevDepth !== undefined && prevDepth < nextDepth) continue;
+			visitedDepth.set(targetId, nextDepth);
 
-				const node = fullGraph.nodes.get(edge.to);
-				if (!node) continue;
+			const nextPath = [...current.path, targetId];
+			const targetNode = fullGraph.nodes.get(targetId);
+			if (!targetNode) continue;
 
-				// Only include if it has side effects
-				if (node.sideEffects.length > 0) {
-					const downstreamAnchor = impact.changed.get(edge.to);
-					results.push({
-						node,
-						order: 0, // will be set by caller
-						sideEffects: node.sideEffects,
-						callsTo: (fullGraph.outbound.get(edge.to) ?? []).map((e) => e.to),
-						isChanged: !!downstreamAnchor,
-						changeKind: downstreamAnchor?.changeKind ?? null,
-						changedRanges: downstreamAnchor?.changedRanges ?? [],
-						rationale: "Downstream side effect",
-						confidence: edge.confidence,
-					});
-				}
-
-				nextFrontier.add(edge.to);
+			if (
+				(impact.changed.has(targetId) && targetId !== startId) ||
+				targetNode.sideEffects.length > 0 ||
+				(nextDepth === 1 && isChangedCallsiteTarget(startId, targetId, impact, fullGraph))
+			) {
+				const existing = results.get(targetId);
+				if (!existing || nextPath.length < existing.length) results.set(targetId, nextPath);
 			}
+
+			queue.push({ nodeId: targetId, path: nextPath, depth: nextDepth });
 		}
-		frontier = nextFrontier;
 	}
 
-	return results;
+	return Array.from(results.values())
+		.sort((a, b) => a.length - b.length)
+		.slice(0, MAX_DOWNSTREAM_TARGETS_PER_MEMBER);
 }
 
-// ── Flow Naming ──
-
-/**
- * Name the flow after what changed, not after every possible caller.
- * If the primary change IS an entrypoint, use the entrypoint naming.
- * Otherwise, use the primary symbol's name + file context.
- */
-function nameFlow(group: ChangeGroup, impact: ImpactGraph, fullGraph: SemanticCodeGraph): string {
-	const primaryNode = impact.changed.get(group.primary)?.resolvedNode ?? fullGraph.nodes.get(group.primary);
-	if (!primaryNode) return parseSymbolId(group.primary).qualifiedName;
-
-	// If primary is an entrypoint, use entrypoint-style naming
-	if (primaryNode.entrypointKind) {
-		return nameEntrypoint(primaryNode);
+function classifyFlowReviewCategory(
+	plan: EntrypointPlan,
+	includedMemberIds: SymbolId[],
+	impact: ImpactGraph,
+	fullGraph: SemanticCodeGraph,
+): ReviewerFlow["reviewCategory"] {
+	if (!plan.entrypointId) {
+		return includedMemberIds.some((memberId) => impact.changed.get(memberId)?.changeKind === "added")
+			? "new"
+			: "modified";
 	}
 
-	// If there's a known entrypoint, show "entrypoint → primary"
-	if (group.entrypointId) {
-		const epNode = fullGraph.nodes.get(group.entrypointId);
-		if (epNode) {
-			const epName = nameEntrypoint(epNode);
-			return `${epName} → ${primaryNode.name}`;
-		}
+	const entrypointNode = fullGraph.nodes.get(plan.entrypointId);
+	if (!entrypointNode) return "impacted";
+
+	const entrypointAnchor = impact.changed.get(plan.entrypointId);
+	if (entrypointAnchor?.changeKind === "added") return "new";
+	if (entrypointAnchor) return "modified";
+
+	for (const memberId of includedMemberIds) {
+		const anchor = impact.changed.get(memberId);
+		if (!anchor) continue;
+		const changedNode = anchor.resolvedNode ?? fullGraph.nodes.get(memberId);
+		if (!changedNode) continue;
+		if (hasFeatureAffinity(entrypointNode, changedNode)) return "modified";
 	}
 
-	// Fallback: file name context + function name
+	return "impacted";
+}
+
+function compareFlowReviewCategory(
+	a: ReviewerFlow["reviewCategory"],
+	b: ReviewerFlow["reviewCategory"],
+): number {
+	const rank: Record<ReviewerFlow["reviewCategory"], number> = {
+		new: 0,
+		modified: 1,
+		impacted: 2,
+	};
+	return rank[a] - rank[b];
+}
+
+const GENERIC_FLOW_TOKENS = new Set([
+	"src", "app", "apps", "page", "pages", "api", "route", "routes",
+	"job", "jobs", "worker", "workers", "cron", "crons",
+	"lib", "libs", "util", "utils", "helper", "helpers", "shared", "common", "core",
+	"service", "services", "module", "modules",
+	"component", "components", "hook", "hooks",
+	"test", "tests", "spec", "specs", "index",
+	"merchant", "consumer", "client", "server", "web", "ws", "event", "events", "webhook", "webhooks",
+	"handler", "handlers", "controller", "controllers",
+	"ts", "tsx", "js", "jsx", "mjs", "cjs",
+]);
+
+function hasFeatureAffinity(entrypointNode: SymbolNode, changedNode: SymbolNode): boolean {
+	if (entrypointNode.filePath === changedNode.filePath) return true;
+
+	const entryTokens = extractFlowTokens(entrypointNode.filePath, entrypointNode.name);
+	const changedTokens = extractFlowTokens(changedNode.filePath, changedNode.name);
+
+	for (const token of changedTokens) {
+		if (entryTokens.has(token)) return true;
+	}
+
+	return false;
+}
+
+function extractFlowTokens(filePath: string, symbolName: string): Set<string> {
+	const raw = `${filePath} ${symbolName}`;
+	const tokens = raw
+		.split(/[^A-Za-z0-9]+/)
+		.flatMap(splitFlowToken)
+		.map((token) => token.toLowerCase())
+		.filter((token) => token.length >= 3 && !GENERIC_FLOW_TOKENS.has(token));
+
+	return new Set(tokens);
+}
+
+function splitFlowToken(token: string): string[] {
+	if (!token) return [];
+	return token
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+		.split(/\s+/)
+		.filter(Boolean);
+}
+
+// ── Naming ──
+
+function nameFlow(entrypointNode: SymbolNode | null, primaryNode: SymbolNode, changedCount: number): string {
+	if (entrypointNode && entrypointNode.id === primaryNode.id && entrypointNode.entrypointKind) {
+		return nameEntrypoint(entrypointNode);
+	}
+
+	if (entrypointNode?.entrypointKind) {
+		const entrypointName = nameEntrypoint(entrypointNode);
+		if (changedCount > 1) return `${entrypointName} → ${primaryNode.name} (+${changedCount - 1})`;
+		return `${entrypointName} → ${primaryNode.name}`;
+	}
+
 	const fileName = primaryNode.filePath.split("/").pop()?.replace(/\.\w+$/, "") ?? "";
-	if (group.members.length > 1) {
-		return `${fileName}: ${primaryNode.name} (+${group.members.length - 1})`;
-	}
+	if (changedCount > 1) return `${fileName}: ${primaryNode.name} (+${changedCount - 1})`;
 	return `${fileName}: ${primaryNode.name}`;
 }
 
@@ -426,21 +630,101 @@ function nameEntrypoint(node: SymbolNode): string {
 		}
 		case "test-function":
 			return `test: ${jobName}`;
+		case "event-handler":
+			return `event: ${node.qualifiedName ?? node.name}`;
 		case "react-component":
 			return `<${node.name} />`;
-		case "queue-consumer": {
-			if (/^(perform|prePerform|postPerform|execute|run|handle|process)$/.test(node.name)) {
-				return `job: ${jobName}.${node.name}`;
-			}
-			return `job: ${node.name}`;
-		}
-		case "cron-job": {
-			if (/^(perform|prePerform|postPerform|execute|run|handle)$/.test(node.name)) {
-				return `cron: ${jobName}.${node.name}`;
-			}
-			return `cron: ${node.name}`;
-		}
+		case "queue-consumer":
+			return /^(perform|prePerform|postPerform|execute|run|handle|process)$/.test(node.name)
+				? `job: ${jobName}.${node.name}`
+				: `job: ${node.name}`;
+		case "cron-job":
+			return /^(perform|prePerform|postPerform|execute|run|handle)$/.test(node.name)
+				? `cron: ${jobName}.${node.name}`
+				: `cron: ${node.name}`;
 		default:
 			return node.qualifiedName ?? node.name;
 	}
+}
+
+// ── Helpers ──
+
+function shouldCreateSelfRootFlow(
+	memberId: SymbolId,
+	impact: ImpactGraph,
+	fullGraph: SemanticCodeGraph,
+): boolean {
+	const node = impact.changed.get(memberId)?.resolvedNode ?? fullGraph.nodes.get(memberId);
+	if (!node) return false;
+	if (node.entrypointKind) return true;
+	if (!node.isExported) return false;
+	return node.kind === "function" || node.kind === "method" || node.kind === "class";
+}
+
+function isChangedCallsiteTarget(
+	startId: SymbolId,
+	targetId: SymbolId,
+	impact: ImpactGraph,
+	fullGraph: SemanticCodeGraph,
+): boolean {
+	const anchor = impact.changed.get(startId);
+	const startNode = fullGraph.nodes.get(startId) ?? anchor?.resolvedNode;
+	const targetNode = fullGraph.nodes.get(targetId);
+	if (!anchor || !startNode || !targetNode) return false;
+
+	const changedText = getChangedText(startNode, anchor.changedRanges);
+	if (!changedText) return false;
+
+	return changedTextMentionsTarget(changedText, targetNode.name);
+}
+
+function getChangedText(
+	node: SymbolNode,
+	ranges: Array<{ start: number; end: number }>,
+): string {
+	const sourceFile = typeof node.node.getSourceFile === "function" ? node.node.getSourceFile() : null;
+	const allLines = sourceFile
+		? sourceFile.getFullText().split("\n")
+		: node.node.getText().split("\n");
+	const snippets: string[] = [];
+
+	for (const range of ranges) {
+		const start = Math.max(range.start, node.line);
+		const end = Math.min(range.end, node.endLine);
+		for (let line = start; line <= end; line++) {
+			const index = sourceFile ? line - 1 : line - node.line;
+			const lineText = allLines[index];
+			if (lineText !== undefined) snippets.push(lineText);
+		}
+	}
+
+	return snippets.join("\n");
+}
+
+function changedTextMentionsTarget(changedText: string, targetName: string): boolean {
+	if (!changedText.trim() || !targetName.trim()) return false;
+	const escapedName = escapeRegExp(targetName);
+	return new RegExp(`\\b${escapedName}\\b`).test(changedText);
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function pickRationale(current: string | undefined, next: string): string {
+	if (!current) return next;
+	const rank: Record<string, number> = {
+		"Modified by this diff": 4,
+		"Entry point": 3,
+		"Touched by changed call site": 2,
+		"Downstream side effect": 2,
+		"Calls changed code": 1,
+		"On execution path": 0,
+	};
+	return (rank[next] ?? 0) > (rank[current] ?? 0) ? next : current;
+}
+
+function minConfidence(a: ConfidenceLevel, b: ConfidenceLevel): ConfidenceLevel {
+	const rank: Record<ConfidenceLevel, number> = { high: 2, medium: 1, low: 0 };
+	return rank[a] <= rank[b] ? a : b;
 }

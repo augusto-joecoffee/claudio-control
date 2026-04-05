@@ -4,11 +4,12 @@
  * or extra text around the JSON.
  */
 
-import { randomUUID } from "crypto";
 import type {
 	BehaviorAnalysis, ChangedBehavior, ExecutionStep, ChangedSymbol,
 	SideEffect, CodeSnippet, EntrypointKind, ConfidenceLevel, SideEffectKind,
 } from "../types";
+import { buildFlowFingerprint, buildFlowKey, buildStepFingerprint, buildStepKey } from "./identity";
+import { CURRENT_BEHAVIOR_ANALYSIS_VERSION } from "./version";
 
 interface RawStep {
 	filePath?: string;
@@ -86,6 +87,7 @@ export function parseClaudeResponse(
 
 	return {
 		sessionId,
+		analysisVersion: CURRENT_BEHAVIOR_ANALYSIS_VERSION,
 		diffFingerprint,
 		behaviors,
 		orphanedSymbols: [],
@@ -98,7 +100,6 @@ export function parseClaudeResponse(
 function mapFlow(raw: RawFlow, warnings: string[]): ChangedBehavior | null {
 	if (!raw.name || !raw.steps || raw.steps.length === 0) return null;
 
-	const behaviorId = randomUUID();
 	const entrypointKind = VALID_ENTRYPOINT_KINDS.includes(raw.entrypointKind as EntrypointKind)
 		? (raw.entrypointKind as EntrypointKind)
 		: "exported-function";
@@ -120,6 +121,13 @@ function mapFlow(raw: RawFlow, warnings: string[]): ChangedBehavior | null {
 		const filePath = rawStep.filePath;
 		const line = rawStep.line ?? 1;
 		const isChanged = rawStep.isChanged ?? false;
+		const stepKey = buildStepKey(`${filePath}::${rawStep.symbolName}`);
+		const fingerprint = buildStepFingerprint(
+			stepKey,
+			`${rawStep.symbolName}\n${rawStep.rationale ?? ""}\n${line}`,
+			[{ start: line, end: line }],
+			isChanged,
+		);
 
 		if (isChanged) changedCount++;
 		touchedFiles.add(filePath);
@@ -170,7 +178,9 @@ function mapFlow(raw: RawFlow, warnings: string[]): ChangedBehavior | null {
 		};
 
 		steps.push({
-			id: `${behaviorId}-step-${i}`,
+			id: stepKey,
+			key: stepKey,
+			fingerprint,
 			order: i,
 			symbol,
 			snippet,
@@ -203,9 +213,20 @@ function mapFlow(raw: RawFlow, warnings: string[]): ChangedBehavior | null {
 		entrypoint = steps[0].symbol;
 	}
 
+	const entrypointKey = buildStepKey(`${entrypoint.location.filePath}::${entrypoint.qualifiedName ?? entrypoint.name}`);
+	const primaryStepKey = steps.find((step) => step.isChanged)?.key ?? steps[0].key;
+	const flowKey = buildFlowKey(entrypointKey, primaryStepKey, steps.map((step) => step.key));
+	const flowFingerprint = buildFlowFingerprint(
+		entrypointKey,
+		steps.map((step) => ({ key: step.key, fingerprint: step.fingerprint, isChanged: step.isChanged })),
+	);
+
 	return {
-		id: behaviorId,
+		id: flowKey,
+		key: flowKey,
+		fingerprint: flowFingerprint,
 		name: raw.name,
+		reviewCategory: steps[0]?.isChanged ? "modified" : "impacted",
 		entrypointKind,
 		entrypoint,
 		steps,
@@ -284,6 +305,7 @@ function emptyResult(
 ): BehaviorAnalysis {
 	return {
 		sessionId,
+		analysisVersion: CURRENT_BEHAVIOR_ANALYSIS_VERSION,
 		diffFingerprint,
 		behaviors: [],
 		orphanedSymbols: [],

@@ -5,6 +5,8 @@ import { loadReview } from "@/lib/review-store";
 import { getDiffFingerprint, getFullDiff } from "@/lib/review-diff";
 import { loadBehaviorAnalysis, saveBehaviorAnalysis } from "@/lib/behavior-store";
 import { analyzeBehaviors } from "@/lib/behavior";
+import { CURRENT_BEHAVIOR_ANALYSIS_VERSION } from "@/lib/behavior/version";
+import { buildOrphanBehaviorId, isOrphanBehaviorId, makeOrphanBehavior } from "@/lib/behavior/orphaned";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +26,19 @@ export async function GET(
 
 	// Load or compute analysis
 	let analysis = await loadBehaviorAnalysis(sessionId);
-	if (!analysis || analysis.diffFingerprint !== fingerprint) {
+	if (!analysis || analysis.analysisVersion !== CURRENT_BEHAVIOR_ANALYSIS_VERSION || analysis.diffFingerprint !== fingerprint) {
 		const rawDiff = await getFullDiff(cwd, review.mergeBase);
 		analysis = await analyzeBehaviors(sessionId, rawDiff, cwd, fingerprint);
 		await saveBehaviorAnalysis(sessionId, analysis);
 	}
 
-	const behavior = analysis.behaviors.find((b) => b.id === behaviorId);
+	let behavior = analysis.behaviors.find((b) => b.id === behaviorId) ?? null;
+	if (!behavior && isOrphanBehaviorId(behaviorId)) {
+		const orphanedSymbol = analysis.orphanedSymbols.find((symbol) => buildOrphanBehaviorId(symbol) === behaviorId);
+		if (orphanedSymbol) {
+			behavior = makeOrphanBehavior(orphanedSymbol);
+		}
+	}
 	if (!behavior) {
 		return NextResponse.json({ error: "Behavior not found" }, { status: 404 });
 	}

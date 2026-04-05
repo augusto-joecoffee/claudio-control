@@ -9,6 +9,10 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 interface FlowStepViewerProps {
 	behavior: ChangedBehavior;
 	comments: ReviewComment[];
+	isFlowReviewed?: boolean;
+	onToggleFlowReviewed?: (behavior: ChangedBehavior) => void;
+	isStepReviewed?: (stepId: string) => boolean;
+	onToggleStepReviewed?: (step: ChangedBehavior["steps"][number]) => void;
 	activeCommentLocation: { filePath: string; startLine: number; endLine: number } | null;
 	onGutterClick: (filePath: string, startLine: number, endLine: number, anchorSnippet: string) => void;
 	onSubmitComment: (content: string) => void;
@@ -49,6 +53,10 @@ function buildChangedLineSet(behavior: ChangedBehavior): Map<string, Set<number>
 export const FlowStepViewer = memo(function FlowStepViewer({
 	behavior,
 	comments,
+	isFlowReviewed,
+	onToggleFlowReviewed,
+	isStepReviewed,
+	onToggleStepReviewed,
 	activeCommentLocation,
 	onGutterClick,
 	onSubmitComment,
@@ -82,6 +90,18 @@ export const FlowStepViewer = memo(function FlowStepViewer({
 				<div className="flex items-center gap-2 mb-1.5">
 					<h2 className="text-sm font-medium text-zinc-200">{behavior.name}</h2>
 					<ConfidenceIndicator level={behavior.confidence} showLabel />
+					{onToggleFlowReviewed && (
+						<button
+							onClick={() => onToggleFlowReviewed(behavior)}
+							className={`ml-1 text-[10px] px-2 py-0.5 rounded border transition-colors ${
+								isFlowReviewed
+									? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15"
+									: "border-zinc-700 text-zinc-400 hover:text-emerald-300 hover:border-emerald-500/40"
+							}`}
+						>
+							{isFlowReviewed ? "Flow Viewed" : "Mark Flow Viewed"}
+						</button>
+					)}
 				</div>
 				<div className="flex items-center gap-3 text-[11px] text-zinc-500">
 					<span>{entrypointKindLabel[behavior.entrypointKind] ?? behavior.entrypointKind}</span>
@@ -140,6 +160,8 @@ export const FlowStepViewer = memo(function FlowStepViewer({
 						<FlowStepCard
 							step={step}
 							totalSteps={behavior.totalStepCount}
+							isReviewed={isStepReviewed?.(step.id) ?? false}
+							onToggleReviewed={onToggleStepReviewed}
 							changedLines={changedLinesByFile.get(step.symbol.location.filePath)}
 							comments={comments}
 							activeCommentLine={

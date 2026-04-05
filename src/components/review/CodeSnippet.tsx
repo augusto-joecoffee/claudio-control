@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { refractor as _refractor } from "refractor";
 import type { Element, Text } from "hast";
 import type { CodeSnippet as CodeSnippetType } from "@/lib/types";
@@ -33,6 +33,7 @@ function detectLang(filePath: string): string | null {
 }
 
 type HastNode = Element | Text | { type: string; children?: HastNode[]; value?: string };
+type VisibleBlock = { type: "code"; startLine: number; endLine: number } | { type: "gap"; startLine: number; endLine: number };
 
 function renderNodes(nodes: HastNode[], key: string = ""): React.ReactNode[] {
 	return nodes.map((node, i) => {
@@ -50,9 +51,66 @@ function renderNodes(nodes: HastNode[], key: string = ""): React.ReactNode[] {
 	});
 }
 
+function getTextContent(node: Element): string {
+	let text = "";
+	for (const child of node.children) {
+		if (child.type === "text") text += (child as Text).value;
+		else if (child.type === "element") text += getTextContent(child as Element);
+	}
+	return text;
+}
+
+function buildVisibleBlocks(
+	snippet: CodeSnippetType,
+	lines: string[],
+	changedLines?: Set<number>,
+	collapseUnchangedGaps?: boolean,
+	contextRadius: number = 2,
+): VisibleBlock[] {
+	if (!collapseUnchangedGaps || !changedLines || lines.length === 0) {
+		return [{ type: "code", startLine: snippet.startLine, endLine: snippet.endLine }];
+	}
+
+	const relevantChanged = Array.from(changedLines)
+		.filter((line) => line >= snippet.startLine && line <= snippet.endLine)
+		.sort((a, b) => a - b);
+
+	if (relevantChanged.length === 0) {
+		return [{ type: "code", startLine: snippet.startLine, endLine: snippet.endLine }];
+	}
+
+	const ranges: Array<{ start: number; end: number }> = [];
+	for (const line of relevantChanged) {
+		const start = Math.max(snippet.startLine, line - contextRadius);
+		const end = Math.min(snippet.endLine, line + contextRadius);
+		const last = ranges[ranges.length - 1];
+		if (last && start <= last.end + 1) {
+			last.end = Math.max(last.end, end);
+		} else {
+			ranges.push({ start, end });
+		}
+	}
+
+	const blocks: VisibleBlock[] = [];
+	let cursor = snippet.startLine;
+	for (const range of ranges) {
+		if (range.start > cursor) {
+			blocks.push({ type: "gap", startLine: cursor, endLine: range.start - 1 });
+		}
+		blocks.push({ type: "code", startLine: range.start, endLine: range.end });
+		cursor = range.end + 1;
+	}
+	if (cursor <= snippet.endLine) {
+		blocks.push({ type: "gap", startLine: cursor, endLine: snippet.endLine });
+	}
+
+	return blocks;
+}
+
 interface CodeSnippetProps {
 	snippet: CodeSnippetType;
 	changedLines?: Set<number>;
+	collapseUnchangedGaps?: boolean;
 	onLineClick?: (line: number) => void;
 	onExpandUp?: () => void;
 	onExpandDown?: () => void;
@@ -63,6 +121,7 @@ interface CodeSnippetProps {
 export const CodeSnippetView = memo(function CodeSnippetView({
 	snippet,
 	changedLines,
+	collapseUnchangedGaps,
 	onLineClick,
 	onExpandUp,
 	onExpandDown,
@@ -70,6 +129,7 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 	canExpandDown,
 }: CodeSnippetProps) {
 	const lines = useMemo(() => (snippet.content ?? "").split("\n"), [snippet.content]);
+	const [expandedGaps, setExpandedGaps] = useState<Set<string>>(new Set());
 
 	const lang = useMemo(() => detectLang(snippet.filePath), [snippet.filePath]);
 
@@ -83,11 +143,8 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 		}
 	}, [lang, snippet.content]);
 
-	// When highlighted, split into per-line spans
 	const highlightedLines = useMemo(() => {
 		if (!highlighted) return null;
-		// Flatten the highlighted AST into per-line chunks
-		const allText = (snippet.content ?? "").split("\n");
 		const lineNodes: React.ReactNode[][] = [];
 		let currentLine: React.ReactNode[] = [];
 		let charIdx = 0;
@@ -108,13 +165,9 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 				} else if (node.type === "element") {
 					const el = node as Element;
 					const className = (el.properties?.className as string[] | undefined)?.join(" ");
-					// Check if this element spans multiple lines
 					const innerText = getTextContent(el);
 					if (innerText.includes("\n")) {
-						// Recurse into children to split by line
-						const saved = currentLine.length;
 						walk(el.children as HastNode[]);
-						// Wrap segments that were added
 					} else {
 						currentLine.push(
 							<span key={`h-${charIdx}`} className={className}>
@@ -129,9 +182,51 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 
 		walk(highlighted);
 		if (currentLine.length > 0) lineNodes.push(currentLine);
-
 		return lineNodes;
-	}, [highlighted, snippet.content]);
+	}, [highlighted]);
+
+	const visibleBlocks = useMemo(
+		() => buildVisibleBlocks(snippet, lines, changedLines, collapseUnchangedGaps),
+		[snippet, lines, changedLines, collapseUnchangedGaps],
+	);
+
+	const renderLine = (lineNum: number) => {
+		const idx = lineNum - snippet.startLine;
+		const isChanged = changedLines?.has(lineNum) ?? false;
+		return (
+			<div
+				key={lineNum}
+				className="flex"
+				style={isChanged ? { background: "rgba(46, 160, 67, 0.15)" } : undefined}
+			>
+				<button
+					onClick={() => onLineClick?.(lineNum)}
+					className="w-10 shrink-0 text-right pr-2 select-none cursor-pointer transition-colors border-r border-[#21262d]"
+					style={isChanged
+						? { background: "rgba(46, 160, 67, 0.2)", color: "#3fb950" }
+						: { color: "#484f58" }
+					}
+					onMouseEnter={(e) => { e.currentTarget.style.color = "#58a6ff"; e.currentTarget.style.background = "rgba(56, 139, 253, 0.1)"; }}
+					onMouseLeave={(e) => {
+						if (isChanged) {
+							e.currentTarget.style.color = "#3fb950";
+							e.currentTarget.style.background = "rgba(46, 160, 67, 0.2)";
+						} else {
+							e.currentTarget.style.color = "#484f58";
+							e.currentTarget.style.background = "";
+						}
+					}}
+				>
+					{lineNum}
+				</button>
+				<span className="flex-1 pl-4 pr-2 whitespace-pre" style={{ color: "#c9d1d9" }}>
+					{highlightedLines && highlightedLines[idx]
+						? highlightedLines[idx]
+						: lines[idx]}
+				</span>
+			</div>
+		);
+	};
 
 	return (
 		<div className="diff-viewer-container rounded border border-[#21262d] bg-[#0d1117] overflow-hidden text-[12px] leading-5" style={{ fontFamily: "var(--font-geist-mono), monospace" }}>
@@ -147,36 +242,55 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 				</button>
 			)}
 			<div className="overflow-x-auto">
-				{lines.map((line, i) => {
-					const lineNum = snippet.startLine + i;
-					const isChanged = changedLines?.has(lineNum) ?? false;
+				{visibleBlocks.map((block, blockIdx) => {
+					if (block.type === "code") {
+						const rendered = [];
+						for (let lineNum = block.startLine; lineNum <= block.endLine; lineNum++) {
+							rendered.push(renderLine(lineNum));
+						}
+						return <div key={`code-${block.startLine}-${block.endLine}`}>{rendered}</div>;
+					}
+
+					const gapKey = `${block.startLine}-${block.endLine}`;
+					const expanded = expandedGaps.has(gapKey);
+					if (expanded) {
+						const rendered = [];
+						for (let lineNum = block.startLine; lineNum <= block.endLine; lineNum++) {
+							rendered.push(renderLine(lineNum));
+						}
+						return (
+							<div key={`gap-open-${gapKey}`}>
+								<button
+									onClick={() => {
+										setExpandedGaps((prev) => {
+											const next = new Set(prev);
+											next.delete(gapKey);
+											return next;
+										});
+									}}
+									className="w-full px-3 py-1 text-[10px] text-blue-400/60 hover:text-blue-400 hover:bg-blue-500/5 transition-colors flex items-center justify-center gap-1 border-y border-[#21262d]"
+								>
+									Hide {block.endLine - block.startLine + 1} unchanged lines
+								</button>
+								{rendered}
+							</div>
+						);
+					}
+
 					return (
-						<div
-							key={lineNum}
-							className="flex"
-							style={isChanged ? { background: "rgba(46, 160, 67, 0.15)" } : undefined}
+						<button
+							key={`gap-${gapKey}-${blockIdx}`}
+							onClick={() => {
+								setExpandedGaps((prev) => {
+									const next = new Set(prev);
+									next.add(gapKey);
+									return next;
+								});
+							}}
+							className="w-full px-3 py-1 text-[10px] text-zinc-500 hover:text-blue-400 hover:bg-blue-500/5 transition-colors flex items-center justify-center gap-1 border-y border-[#21262d]"
 						>
-							<button
-								onClick={() => onLineClick?.(lineNum)}
-								className="w-10 shrink-0 text-right pr-2 select-none cursor-pointer transition-colors border-r border-[#21262d]"
-								style={isChanged
-									? { background: "rgba(46, 160, 67, 0.2)", color: "#3fb950" }
-									: { color: "#484f58" }
-								}
-								onMouseEnter={(e) => { e.currentTarget.style.color = "#58a6ff"; e.currentTarget.style.background = "rgba(56, 139, 253, 0.1)"; }}
-								onMouseLeave={(e) => {
-									if (isChanged) { e.currentTarget.style.color = "#3fb950"; e.currentTarget.style.background = "rgba(46, 160, 67, 0.2)"; }
-									else { e.currentTarget.style.color = "#484f58"; e.currentTarget.style.background = ""; }
-								}}
-							>
-								{lineNum}
-							</button>
-							<span className="flex-1 pl-4 pr-2 whitespace-pre" style={{ color: "#c9d1d9" }}>
-								{highlightedLines && highlightedLines[i]
-									? highlightedLines[i]
-									: line}
-							</span>
-						</div>
+							Show {block.endLine - block.startLine + 1} unchanged lines
+						</button>
 					);
 				})}
 			</div>
@@ -194,12 +308,3 @@ export const CodeSnippetView = memo(function CodeSnippetView({
 		</div>
 	);
 });
-
-function getTextContent(node: Element): string {
-	let text = "";
-	for (const child of node.children) {
-		if (child.type === "text") text += (child as Text).value;
-		else if (child.type === "element") text += getTextContent(child as Element);
-	}
-	return text;
-}

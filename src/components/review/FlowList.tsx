@@ -2,6 +2,7 @@
 
 import { memo, useMemo } from "react";
 import type { ChangedBehavior, ChangedSymbol, ReviewComment } from "@/lib/types";
+import { buildOrphanBehaviorId } from "@/lib/behavior/orphaned";
 import { SideEffectBadge } from "./SideEffectBadge";
 import { ConfidenceDots } from "./ConfidenceIndicator";
 
@@ -12,7 +13,7 @@ interface FlowListProps {
 	onSelectBehavior: (id: string | null) => void;
 	onCollapse?: () => void;
 	isReviewed?: (id: string) => boolean;
-	onToggleReviewed?: (id: string) => void;
+	onToggleReviewed?: (behavior: ChangedBehavior) => void;
 	reviewedCount?: number;
 	comments: ReviewComment[];
 	isLoading?: boolean;
@@ -21,6 +22,17 @@ interface FlowListProps {
 function commentCountForBehavior(behavior: ChangedBehavior, comments: ReviewComment[]): number {
 	const fileSet = new Set(behavior.touchedFiles);
 	return comments.filter((c) => fileSet.has(c.filePath)).length;
+}
+
+function commentCountForOrphanedSymbol(symbol: ChangedSymbol, comments: ReviewComment[]): number {
+	const startLine = symbol.location.line;
+	const endLine = symbol.location.endLine ?? startLine;
+	return comments.filter(
+		(comment) =>
+			comment.filePath === symbol.location.filePath &&
+			comment.line >= startLine &&
+			comment.line <= endLine,
+	).length;
 }
 
 const ENTRYPOINT_ICONS: Record<string, string> = {
@@ -47,6 +59,14 @@ const ENTRYPOINT_COLORS: Record<string, string> = {
 	"unknown": "text-zinc-500",
 };
 
+const FLOW_CATEGORY_ORDER: Array<ChangedBehavior["reviewCategory"]> = ["new", "modified", "impacted"];
+
+const FLOW_CATEGORY_LABELS: Record<ChangedBehavior["reviewCategory"], string> = {
+	new: "New Flows",
+	modified: "Modified Flows",
+	impacted: "Impacted Flows",
+};
+
 export const FlowList = memo(function FlowList({
 	behaviors,
 	orphanedSymbols,
@@ -59,6 +79,16 @@ export const FlowList = memo(function FlowList({
 	comments,
 	isLoading,
 }: FlowListProps) {
+	const groupedBehaviors = useMemo(
+		() =>
+			FLOW_CATEGORY_ORDER.map((category) => ({
+				category,
+				label: FLOW_CATEGORY_LABELS[category],
+				behaviors: behaviors.filter((behavior) => (behavior.reviewCategory ?? "modified") === category),
+			})).filter((section) => section.behaviors.length > 0),
+		[behaviors],
+	);
+
 	return (
 		<div className="flex flex-col h-full">
 			{/* Header */}
@@ -105,91 +135,124 @@ export const FlowList = memo(function FlowList({
 				)}
 
 				{/* Behavior rows */}
-				{behaviors.map((behavior) => {
-					const isSelected = selectedBehaviorId === behavior.id;
-					const reviewed = isReviewed?.(behavior.id) ?? false;
-					const commentCount = commentCountForBehavior(behavior, comments);
-					const icon = ENTRYPOINT_ICONS[behavior.entrypointKind] ?? "?";
-					const iconColor = ENTRYPOINT_COLORS[behavior.entrypointKind] ?? "text-zinc-500";
-
-					return (
-						<div
-							key={behavior.id}
-							className={`w-full hover:bg-white/5 transition-colors cursor-pointer ${
-								isSelected ? "bg-white/8 border-l-2 border-violet-500" : "border-l-2 border-transparent"
-							} ${reviewed ? "opacity-50" : ""}`}
-						>
-							<div className="flex items-start gap-1">
-								{/* Review checkbox */}
-								{onToggleReviewed && (
-									<button
-										onClick={(e) => { e.stopPropagation(); onToggleReviewed(behavior.id); }}
-										className="pl-2 pt-2 text-zinc-600 hover:text-emerald-400 transition-colors shrink-0"
-										title={reviewed ? "Mark as unreviewed" : "Mark as reviewed"}
-									>
-										<svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-											{reviewed ? (
-												<path d="M4.5 12.75l6 6 9-13.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400" />
-											) : (
-												<rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
-											)}
-										</svg>
-									</button>
-								)}
-
-								{/* Main click area */}
-								<button
-									onClick={() => onSelectBehavior(isSelected ? null : behavior.id)}
-									className={`flex-1 text-left ${onToggleReviewed ? "pl-0" : "pl-3"} pr-3 py-2 min-w-0`}
-								>
-									{/* Row 1: icon + name + file count */}
-									<div className="flex items-center gap-1.5 mb-0.5">
-										<span className={`text-[9px] font-mono font-bold shrink-0 ${iconColor}`}>
-											{icon}
-										</span>
-										<span className="text-xs text-zinc-300 truncate flex-1" title={behavior.name}>
-											{behavior.name}
-										</span>
-										<span className="text-[10px] text-zinc-600 shrink-0">
-											{behavior.touchedFiles.length} file{behavior.touchedFiles.length !== 1 ? "s" : ""}
-										</span>
-									</div>
-
-									{/* Row 2: confidence + side effects + comment count */}
-									<div className="flex items-center gap-1.5">
-										<ConfidenceDots level={behavior.confidence} />
-										{behavior.sideEffects.slice(0, 3).map((se, i) => (
-											<SideEffectBadge key={i} kind={se.kind} compact />
-										))}
-										{behavior.sideEffects.length > 3 && (
-											<span className="text-[9px] text-zinc-600">+{behavior.sideEffects.length - 3}</span>
-										)}
-										{commentCount > 0 && (
-											<span className="ml-auto bg-violet-500/20 text-violet-300 rounded-full px-1.5 text-[10px]">
-												{commentCount}
-											</span>
-										)}
-									</div>
-								</button>
+				{groupedBehaviors.map((section) => (
+					<div key={section.category}>
+						<div className="px-3 pt-3 pb-1">
+							<div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-zinc-600 font-semibold">
+								<span>{section.label}</span>
+								<span>{section.behaviors.length}</span>
 							</div>
 						</div>
-					);
-				})}
+						{section.behaviors.map((behavior) => {
+							const isSelected = selectedBehaviorId === behavior.id;
+							const reviewed = isReviewed?.(behavior.id) ?? false;
+							const commentCount = commentCountForBehavior(behavior, comments);
+							const icon = ENTRYPOINT_ICONS[behavior.entrypointKind] ?? "?";
+							const iconColor = ENTRYPOINT_COLORS[behavior.entrypointKind] ?? "text-zinc-500";
 
-				{/* Orphaned / untraced changes */}
+							return (
+								<div
+									key={behavior.id}
+									className={`w-full hover:bg-white/5 transition-colors cursor-pointer ${
+										isSelected ? "bg-white/8 border-l-2 border-violet-500" : "border-l-2 border-transparent"
+									} ${reviewed ? "opacity-50" : ""}`}
+								>
+									<div className="flex items-start gap-1">
+										{onToggleReviewed && (
+											<button
+												onClick={(e) => { e.stopPropagation(); onToggleReviewed(behavior); }}
+												className="pl-2 pt-2 text-zinc-600 hover:text-emerald-400 transition-colors shrink-0"
+												title={reviewed ? "Mark as unreviewed" : "Mark as reviewed"}
+											>
+												<svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+													{reviewed ? (
+														<path d="M4.5 12.75l6 6 9-13.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400" />
+													) : (
+														<rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+													)}
+												</svg>
+											</button>
+										)}
+
+										<button
+											onClick={() => onSelectBehavior(isSelected ? null : behavior.id)}
+											className={`flex-1 text-left ${onToggleReviewed ? "pl-0" : "pl-3"} pr-3 py-2 min-w-0`}
+										>
+											<div className="flex items-center gap-1.5 mb-0.5">
+												<span className={`text-[9px] font-mono font-bold shrink-0 ${iconColor}`}>
+													{icon}
+												</span>
+												<span className="text-xs text-zinc-300 truncate flex-1" title={behavior.name}>
+													{behavior.name}
+												</span>
+												<span className="text-[10px] text-zinc-600 shrink-0">
+													{behavior.touchedFiles.length} file{behavior.touchedFiles.length !== 1 ? "s" : ""}
+												</span>
+											</div>
+
+											<div className="flex items-center gap-1.5">
+												<ConfidenceDots level={behavior.confidence} />
+												{behavior.sideEffects.slice(0, 3).map((se, i) => (
+													<SideEffectBadge key={i} kind={se.kind} compact />
+												))}
+												{behavior.sideEffects.length > 3 && (
+													<span className="text-[9px] text-zinc-600">+{behavior.sideEffects.length - 3}</span>
+												)}
+												{commentCount > 0 && (
+													<span className="ml-auto bg-violet-500/20 text-violet-300 rounded-full px-1.5 text-[10px]">
+														{commentCount}
+													</span>
+												)}
+											</div>
+										</button>
+									</div>
+								</div>
+							);
+						})}
+					</div>
+				))}
+
+				{/* Changed symbols that could not be attached to a flow */}
 				{orphanedSymbols.length > 0 && (
 					<>
 						<div className="px-3 pt-3 pb-1">
-							<div className="text-[10px] uppercase tracking-wider text-zinc-600 font-semibold">
-								Untraced Changes
+							<div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-zinc-600 font-semibold">
+								<span>Changes Without Flow</span>
+								<span>{orphanedSymbols.length}</span>
 							</div>
 						</div>
 						{orphanedSymbols.map((sym, i) => {
+							const orphanId = buildOrphanBehaviorId(sym);
 							const fileName = sym.location.filePath.split("/").pop() ?? "";
+							const isSelected = selectedBehaviorId === orphanId;
+							const commentCount = commentCountForOrphanedSymbol(sym, comments);
 							return (
-								<div key={i} className="px-3 py-1.5 text-xs text-zinc-500 border-l-2 border-transparent">
-									<span className="text-zinc-400">{sym.name}</span>
-									<span className="text-zinc-600 ml-1.5">{fileName}:{sym.location.line}</span>
+								<div
+									key={orphanId}
+									className={`w-full hover:bg-white/5 transition-colors cursor-pointer ${
+										isSelected ? "bg-white/8 border-l-2 border-violet-500" : "border-l-2 border-transparent"
+									}`}
+								>
+									<button
+										onClick={() => onSelectBehavior(isSelected ? null : orphanId)}
+										className="w-full text-left px-3 py-2"
+									>
+										<div className="flex items-center gap-1.5 mb-0.5">
+											<span className="text-[9px] font-mono font-bold text-zinc-500 shrink-0">NF</span>
+											<span className="text-xs text-zinc-300 truncate flex-1" title={sym.qualifiedName ?? sym.name}>
+												{sym.qualifiedName ?? sym.name}
+											</span>
+											<span className="text-[10px] text-zinc-600 shrink-0">1 file</span>
+										</div>
+										<div className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+											<span>{fileName}:{sym.location.line}</span>
+											{commentCount > 0 && (
+												<span className="ml-auto bg-violet-500/20 text-violet-300 rounded-full px-1.5 text-[10px]">
+													{commentCount}
+												</span>
+											)}
+										</div>
+									</button>
 								</div>
 							);
 						})}

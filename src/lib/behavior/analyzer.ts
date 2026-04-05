@@ -13,18 +13,19 @@
  *   Mapping:   flowToBehavior() → BehaviorAnalysis
  */
 
-import { randomUUID } from "crypto";
 import type {
 	BehaviorAnalysis, ChangedBehavior, ChangedSymbol, ExecutionStep,
 	CodeSnippet, ConfidenceLevel,
 } from "../types";
-import type { ReviewerFlow, FlowStep, SymbolNode } from "./graph-types";
+import type { ReviewerFlow, SymbolNode } from "./graph-types";
 import { parseSymbolId } from "./graph-types";
 import { getProjectAndGraph, invalidateGraphCache } from "./symbol-index";
 import { buildEdges, extractImpactGraph } from "./call-graph";
 import { anchorDiffToSymbols } from "./diff-anchors";
 import { deriveFlows } from "./flow-derivation";
 import { ANALYZABLE_EXTENSIONS } from "./patterns";
+import { buildFlowFingerprint, buildFlowKey, buildStepFingerprint, buildStepKey } from "./identity";
+import { CURRENT_BEHAVIOR_ANALYSIS_VERSION } from "./version";
 
 /**
  * Main analysis entry point. Called by index.ts.
@@ -128,14 +129,17 @@ export async function analyzeWithTypeScript(
 
 		// Map to API types
 		const behaviors = flows.map(flowToBehavior);
-		const orphanedSymbols = orphanedSymbolIds.map((id) => {
-			const node = graph.nodes.get(id);
-			const anchor = impact.changed.get(id);
-			return nodeToChangedSymbol(node ?? null, id, true);
-		}).filter((s): s is ChangedSymbol => s !== null);
+		const orphanedSymbols = orphanedSymbolIds
+			.filter((id) => !shouldSuppressOrphanedSymbol(id, graph, behaviors))
+			.map((id) => {
+				const node = graph.nodes.get(id);
+				return nodeToChangedSymbol(node ?? null, id, true);
+			})
+			.filter((s): s is ChangedSymbol => s !== null);
 
 		return {
 			sessionId,
+			analysisVersion: CURRENT_BEHAVIOR_ANALYSIS_VERSION,
 			diffFingerprint,
 			behaviors,
 			orphanedSymbols,
@@ -157,16 +161,25 @@ export function invalidateProjectCache(): void {
 // ── Output Mapping ──
 
 function flowToBehavior(flow: ReviewerFlow): ChangedBehavior {
-	const behaviorId = randomUUID();
+	const steps: ExecutionStep[] = flow.steps.map((step, i) => {
+		const stepKey = buildStepKey(step.node.id);
+		const fingerprint = buildStepFingerprint(
+			step.node.id,
+			step.node.node.getText(),
+			step.changedRanges,
+			step.isChanged,
+		);
 
-	const steps: ExecutionStep[] = flow.steps.map((step, i) => ({
-		id: `${behaviorId}-step-${i}`,
+		return {
+			id: stepKey,
+			key: stepKey,
+			fingerprint,
 		order: i,
 		symbol: nodeToChangedSymbol(step.node, step.node.id, step.isChanged)!,
 		snippet: {
 			filePath: step.node.filePath,
-			startLine: Math.max(1, step.node.line - 2),
-			endLine: step.node.endLine + 2,
+			startLine: step.node.line,
+			endLine: step.node.endLine,
 			language: detectLang(step.node.filePath),
 		} as CodeSnippet,
 		sideEffects: step.sideEffects,
@@ -175,13 +188,26 @@ function flowToBehavior(flow: ReviewerFlow): ChangedBehavior {
 		isChanged: step.isChanged,
 		changedRanges: step.changedRanges.length > 0 ? step.changedRanges : undefined,
 		confidence: step.confidence,
-	}));
+		};
+	});
+
+	const primaryStepKey = steps.find((step) => step.isChanged)?.key ?? steps[0]?.key ?? flow.entrypoint.id;
+	const entrypointKey = buildStepKey(flow.entrypoint.id);
+	const flowKey = buildFlowKey(entrypointKey, primaryStepKey, steps.map((step) => step.key));
+	const fingerprint = buildFlowFingerprint(
+		entrypointKey,
+		steps.map((step) => ({ key: step.key, fingerprint: step.fingerprint, isChanged: step.isChanged })),
+	);
+	const entrypointIsChanged = flow.steps.some((step) => step.node.id === flow.entrypoint.id && step.isChanged);
 
 	return {
-		id: behaviorId,
+		id: flowKey,
+		key: flowKey,
+		fingerprint,
 		name: flow.name,
+		reviewCategory: flow.reviewCategory,
 		entrypointKind: flow.entrypointKind,
-		entrypoint: nodeToChangedSymbol(flow.entrypoint, flow.entrypoint.id, false)!,
+		entrypoint: nodeToChangedSymbol(flow.entrypoint, flow.entrypoint.id, entrypointIsChanged)!,
 		steps,
 		sideEffects: flow.sideEffects,
 		touchedFiles: flow.touchedFiles,
@@ -189,6 +215,23 @@ function flowToBehavior(flow: ReviewerFlow): ChangedBehavior {
 		totalStepCount: steps.length,
 		confidence: flow.confidence,
 	};
+}
+
+function shouldSuppressOrphanedSymbol(
+	symbolId: string,
+	graph: { nodes: Map<string, SymbolNode> },
+	behaviors: ChangedBehavior[],
+): boolean {
+	const node = graph.nodes.get(symbolId);
+	if (!node || node.kind !== "export") return false;
+
+	return behaviors.some((behavior) =>
+		behavior.steps.some((step) =>
+			step.isChanged &&
+			step.symbol.location.filePath === node.filePath &&
+			step.key !== symbolId,
+		),
+	);
 }
 
 function nodeToChangedSymbol(
@@ -244,6 +287,7 @@ function emptyResult(
 ): BehaviorAnalysis {
 	return {
 		sessionId,
+		analysisVersion: CURRENT_BEHAVIOR_ANALYSIS_VERSION,
 		diffFingerprint,
 		behaviors: [],
 		orphanedSymbols: [],
