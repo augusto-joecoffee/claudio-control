@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import type { ChangedBehavior, ChangedSymbol, ReviewComment } from "@/lib/types";
 import { buildOrphanBehaviorId } from "@/lib/behavior/orphaned";
 import { SideEffectBadge } from "./SideEffectBadge";
@@ -89,6 +89,26 @@ export const FlowList = memo(function FlowList({
 		[behaviors],
 	);
 
+	const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
+		if (typeof window === "undefined") return new Set();
+		try {
+			const stored = localStorage.getItem("flow-list:collapsed-categories");
+			return stored ? new Set(JSON.parse(stored)) : new Set();
+		} catch {
+			return new Set();
+		}
+	});
+
+	const toggleCollapse = useCallback((category: string) => {
+		setCollapsedCategories((prev) => {
+			const next = new Set(prev);
+			if (next.has(category)) next.delete(category);
+			else next.add(category);
+			localStorage.setItem("flow-list:collapsed-categories", JSON.stringify([...next]));
+			return next;
+		});
+	}, []);
+
 	return (
 		<div className="flex flex-col h-full">
 			{/* Header */}
@@ -135,15 +155,25 @@ export const FlowList = memo(function FlowList({
 				)}
 
 				{/* Behavior rows */}
-				{groupedBehaviors.map((section) => (
+				{groupedBehaviors.map((section) => {
+					const isCollapsed = collapsedCategories.has(section.category);
+					return (
 					<div key={section.category}>
-						<div className="px-3 pt-3 pb-1">
-							<div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-zinc-600 font-semibold">
-								<span>{section.label}</span>
+						<button
+							onClick={() => toggleCollapse(section.category)}
+							className="w-full px-3 pt-3 pb-1 text-left"
+						>
+							<div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-zinc-600 font-semibold hover:text-zinc-400 transition-colors">
+								<div className="flex items-center gap-1">
+									<svg className={`w-2.5 h-2.5 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+										<path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+									</svg>
+									<span>{section.label}</span>
+								</div>
 								<span>{section.behaviors.length}</span>
 							</div>
-						</div>
-						{section.behaviors.map((behavior) => {
+						</button>
+						{!isCollapsed && section.behaviors.map((behavior) => {
 							const isSelected = selectedBehaviorId === behavior.id;
 							const reviewed = isReviewed?.(behavior.id) ?? false;
 							const commentCount = commentCountForBehavior(behavior, comments);
@@ -210,18 +240,27 @@ export const FlowList = memo(function FlowList({
 							);
 						})}
 					</div>
-				))}
+					);
+				})}
 
 				{/* Changed symbols that could not be attached to a flow */}
 				{orphanedSymbols.length > 0 && (
 					<>
-						<div className="px-3 pt-3 pb-1">
-							<div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-zinc-600 font-semibold">
-								<span>Changes Without Flow</span>
+						<button
+							onClick={() => toggleCollapse("orphaned")}
+							className="w-full px-3 pt-3 pb-1 text-left"
+						>
+							<div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-zinc-600 font-semibold hover:text-zinc-400 transition-colors">
+								<div className="flex items-center gap-1">
+									<svg className={`w-2.5 h-2.5 transition-transform ${collapsedCategories.has("orphaned") ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+										<path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+									</svg>
+									<span>Changes Without Flow</span>
+								</div>
 								<span>{orphanedSymbols.length}</span>
 							</div>
-						</div>
-						{orphanedSymbols.map((sym, i) => {
+						</button>
+						{!collapsedCategories.has("orphaned") && orphanedSymbols.map((sym, i) => {
 							const orphanId = buildOrphanBehaviorId(sym);
 							const fileName = sym.location.filePath.split("/").pop() ?? "";
 							const isSelected = selectedBehaviorId === orphanId;

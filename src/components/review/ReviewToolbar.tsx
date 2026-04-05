@@ -8,7 +8,7 @@ interface CommitInfo {
 	subject: string;
 }
 
-export type ReviewMode = "diff" | "behavior";
+export type ReviewMode = "diff" | "flows";
 
 interface ReviewToolbarProps {
 	sessionName: string;
@@ -28,8 +28,8 @@ interface ReviewToolbarProps {
 	gitHubCommentCount?: number;
 	reviewMode?: ReviewMode;
 	onSetReviewMode?: (mode: ReviewMode) => void;
-	behaviorCount?: number;
-	isBehaviorLoading?: boolean;
+	flowCount?: number;
+	isFlowLoading?: boolean;
 }
 
 const btnClass =
@@ -144,8 +144,8 @@ export const ReviewToolbar = memo(function ReviewToolbar({
 	gitHubCommentCount,
 	reviewMode = "diff",
 	onSetReviewMode,
-	behaviorCount,
-	isBehaviorLoading,
+	flowCount,
+	isFlowLoading,
 }: ReviewToolbarProps) {
 	return (
 		<div className="px-4 py-2.5 border-b border-zinc-800/50 bg-[#0a0a0f]/80 flex items-center gap-3 titlebar-no-drag relative z-[51]">
@@ -192,20 +192,20 @@ export const ReviewToolbar = memo(function ReviewToolbar({
 						Diff
 					</button>
 					<button
-						onClick={() => onSetReviewMode("behavior")}
+						onClick={() => onSetReviewMode("flows")}
 						className={`h-7 px-2.5 text-[11px] transition-colors flex items-center gap-1.5 ${
-							reviewMode === "behavior"
+							reviewMode === "flows"
 								? "bg-violet-500/15 text-violet-300"
 								: "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
 						}`}
 					>
-						Behavior
-						{isBehaviorLoading && (
+						Flows
+						{isFlowLoading && (
 							<span className="w-2.5 h-2.5 rounded-full border border-current border-t-transparent animate-spin" />
 						)}
-						{!isBehaviorLoading && behaviorCount != null && behaviorCount > 0 && reviewMode !== "behavior" && (
+						{!isFlowLoading && flowCount != null && flowCount > 0 && reviewMode !== "flows" && (
 							<span className="text-[9px] px-1 rounded-full bg-violet-500/20 text-violet-400">
-								{behaviorCount}
+								{flowCount}
 							</span>
 						)}
 					</button>

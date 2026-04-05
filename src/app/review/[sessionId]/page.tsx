@@ -67,7 +67,7 @@ export default function ReviewPage() {
 	// Behavior-first review mode
 	const [reviewMode, setReviewMode] = useState<ReviewMode>("diff");
 	const [selectedBehaviorId, setSelectedBehaviorId] = useState<string | null>(null);
-	const isBehaviorMode = reviewMode === "behavior";
+	const isBehaviorMode = reviewMode === "flows";
 
 	const { behaviors, orphanedSymbols, warnings: behaviorWarnings, isLoading: behaviorsLoading, isAnalyzing } = useBehaviors(sessionId, isBehaviorMode);
 	const { behavior: selectedBehavior, isLoading: behaviorDetailLoading } = useBehaviorDetail(sessionId, isBehaviorMode ? selectedBehaviorId : null);
@@ -279,7 +279,7 @@ export default function ReviewPage() {
 
 	const handleSetReviewMode = useCallback((mode: ReviewMode) => {
 		setReviewMode(mode);
-		if (mode === "behavior") {
+		if (mode === "flows") {
 			setSelectedFile(null);
 			setActiveComment(null);
 		}
@@ -328,8 +328,8 @@ export default function ReviewPage() {
 				gitHubCommentCount={githubComments.length}
 				reviewMode={reviewMode}
 				onSetReviewMode={handleSetReviewMode}
-				behaviorCount={behaviors.length}
-				isBehaviorLoading={behaviorsLoading || isAnalyzing}
+				flowCount={behaviors.length}
+				isFlowLoading={behaviorsLoading || isAnalyzing}
 			/>
 
 			{/* Main content */}

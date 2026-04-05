@@ -48,7 +48,19 @@ export function pruneReviewState(
 	return next;
 }
 
-export function toggleFlowReviewState(state: ReviewState, behavior: ChangedBehavior): ReviewState {
+/** Auto-mark any flow whose changed steps are all individually viewed. */
+function autoCompleteFlows(state: ReviewState, allBehaviors: ChangedBehavior[]): void {
+	for (const b of allBehaviors) {
+		if (state.flows[b.id] === b.fingerprint) continue;
+		const changedSteps = b.steps.filter((s) => s.isChanged);
+		if (changedSteps.length === 0) continue;
+		if (changedSteps.every((s) => state.steps[s.id] === s.fingerprint)) {
+			state.flows[b.id] = b.fingerprint;
+		}
+	}
+}
+
+export function toggleFlowReviewState(state: ReviewState, behavior: ChangedBehavior, allBehaviors: ChangedBehavior[]): ReviewState {
 	const next: ReviewState = {
 		flows: { ...state.flows },
 		steps: { ...state.steps },
@@ -64,6 +76,7 @@ export function toggleFlowReviewState(state: ReviewState, behavior: ChangedBehav
 		if (!step.isChanged) continue;
 		next.steps[step.id] = step.fingerprint;
 	}
+	autoCompleteFlows(next, allBehaviors);
 	return next;
 }
 
@@ -88,6 +101,7 @@ export function toggleStepReviewState(
 		}
 	} else {
 		next.steps[step.id] = step.fingerprint;
+		autoCompleteFlows(next, behaviors);
 	}
 
 	return next;
@@ -141,9 +155,9 @@ export function useFlowReviewProgress(sessionId: string, behaviors: ChangedBehav
 
 	const toggleReviewed = useCallback(
 		(behavior: ChangedBehavior) => {
-			setReviewState((prev) => toggleFlowReviewState(prev, behavior));
+			setReviewState((prev) => toggleFlowReviewState(prev, behavior, behaviors));
 		},
-		[setReviewState],
+		[setReviewState, behaviors],
 	);
 
 	const toggleStepReviewed = useCallback(

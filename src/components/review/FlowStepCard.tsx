@@ -117,13 +117,20 @@ export const FlowStepCard = memo(function FlowStepCard({
 					{step.isChanged && onToggleReviewed && (
 						<button
 							onClick={() => onToggleReviewed(step)}
-							className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+							className={`shrink-0 flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
 								isReviewed
-									? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15"
-									: "border-zinc-700 text-zinc-400 hover:text-emerald-300 hover:border-emerald-500/40"
+									? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
+									: "border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600"
 							}`}
 						>
-							{isReviewed ? "Viewed" : "Mark Viewed"}
+							<svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+								{isReviewed ? (
+									<path d="M4.5 12.75l6 6 9-13.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="text-emerald-400" />
+								) : (
+									<rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+								)}
+							</svg>
+							Viewed
 						</button>
 					)}
 					{step.sideEffects.map((effect, i) => (
