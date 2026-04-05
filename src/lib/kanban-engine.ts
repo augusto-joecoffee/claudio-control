@@ -206,10 +206,10 @@ export async function processIdleTransitions(
             stateChanged = true;
             continue;
           }
-          // JSONL confirms completion — clear the guard and proceed
+          // JSONL confirms completion — clear the guard and proceed.
+          // Keep jsonlByteOffset/jsonlPathAtSend so Case B (autocascade)
+          // and Case A1 (queued move) can reuse the deterministic check.
           placement.promptSentAt = undefined;
-          placement.jsonlByteOffset = undefined;
-          placement.jsonlPathAtSend = undefined;
           stateChanged = true;
         } else {
           // Legacy path: fixed timeout
@@ -306,7 +306,15 @@ export async function processIdleTransitions(
       }
 
       // CASE B: Auto-cascade — only when truly done.
-      if (!currentColumn.autoCascade) continue;
+      if (!currentColumn.autoCascade) {
+        // Clean up stale JSONL tracking preserved by the guard
+        if (placement.jsonlByteOffset != null) {
+          placement.jsonlByteOffset = undefined;
+          placement.jsonlPathAtSend = undefined;
+          stateChanged = true;
+        }
+        continue;
+      }
 
       let cascadeReady = false;
 
