@@ -887,21 +887,6 @@ app.on("ready", async () => {
   }
 
   createWindow();
-
-  // When any window gets focus, bring all other app windows to the front.
-  let syncing = false;
-  app.on("browser-window-focus", (_event, focusedWin) => {
-    if (syncing) return;
-    syncing = true;
-    const others = [mainWindow, ...reviewWindows.values()].filter(
-      (w) => w && !w.isDestroyed() && w !== focusedWin && !w.isMinimized(),
-    );
-    for (const win of others) {
-      win.showInactive();
-      win.moveTop();
-    }
-    setTimeout(() => { syncing = false; }, 300);
-  });
 });
 
 app.on("window-all-closed", () => {

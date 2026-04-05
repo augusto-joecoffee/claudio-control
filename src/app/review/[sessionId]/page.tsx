@@ -15,7 +15,12 @@ import { useGitHubComments } from "@/hooks/useGitHubComments";
 import { DiffViewer, parseDiff, getFilePath } from "@/components/review/DiffViewer";
 import { FileTree } from "@/components/review/FileTree";
 import { CommentQueue } from "@/components/review/CommentQueue";
-import { ReviewToolbar } from "@/components/review/ReviewToolbar";
+import { ReviewToolbar, type ReviewMode } from "@/components/review/ReviewToolbar";
+import { FlowList } from "@/components/review/FlowList";
+import { FlowStepViewer } from "@/components/review/FlowStepViewer";
+import { useBehaviors } from "@/hooks/useBehaviors";
+import { useBehaviorDetail } from "@/hooks/useBehaviorDetail";
+import { useFlowReviewProgress } from "@/hooks/useFlowReviewProgress";
 
 export default function ReviewPage() {
 	const params = useParams();
@@ -57,6 +62,15 @@ export default function ReviewPage() {
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
 	const [showGitHubComments, setShowGitHubComments] = useState(true);
+
+	// Behavior-first review mode
+	const [reviewMode, setReviewMode] = useState<ReviewMode>("diff");
+	const [selectedBehaviorId, setSelectedBehaviorId] = useState<string | null>(null);
+	const isBehaviorMode = reviewMode === "behavior";
+
+	const { behaviors, orphanedSymbols, warnings: behaviorWarnings, isLoading: behaviorsLoading, isAnalyzing } = useBehaviors(sessionId, isBehaviorMode);
+	const { behavior: selectedBehavior, isLoading: behaviorDetailLoading } = useBehaviorDetail(sessionId, isBehaviorMode ? selectedBehaviorId : null);
+	const { isReviewed: isFlowReviewed, toggleReviewed: toggleFlowReviewed, reviewedCount: flowReviewedCount } = useFlowReviewProgress(sessionId);
 
 	const pendingSnippetRef = useRef("");
 
@@ -250,6 +264,19 @@ export default function ReviewPage() {
 		setSelectedFile(null);
 	}, []);
 
+	const handleViewInDiff = useCallback((filePath: string, _line: number) => {
+		setReviewMode("diff");
+		setSelectedFile(filePath);
+	}, []);
+
+	const handleSetReviewMode = useCallback((mode: ReviewMode) => {
+		setReviewMode(mode);
+		if (mode === "behavior") {
+			setSelectedFile(null);
+			setActiveComment(null);
+		}
+	}, []);
+
 	const handleOpenInEditor = useCallback((filePath: string) => {
 		const cwd = review?.workingDirectory;
 		if (!cwd) return;
@@ -291,33 +318,52 @@ export default function ReviewPage() {
 				showGitHubComments={showGitHubComments}
 				onToggleGitHubComments={() => setShowGitHubComments((v) => !v)}
 				gitHubCommentCount={githubComments.length}
+				reviewMode={reviewMode}
+				onSetReviewMode={handleSetReviewMode}
+				behaviorCount={behaviors.length}
+				isBehaviorLoading={behaviorsLoading || isAnalyzing}
 			/>
 
 			{/* Main content */}
 			<div className="flex-1 flex min-h-0">
-				{/* File tree sidebar */}
+				{/* Sidebar: FileTree (diff mode) or FlowList (behavior mode) */}
 				{sidebarOpen ? (
 					<div className="w-[250px] border-r border-zinc-800/50 bg-[#0a0a0f]/50 overflow-hidden flex flex-col shrink-0">
-						<FileTree
-							files={files}
-							selectedFile={selectedFile}
-							commentCounts={commentCounts}
-							onSelectFile={setSelectedFile}
-							onCollapse={() => setSidebarOpen(false)}
-							isViewed={isViewed}
-							onToggleViewed={toggleViewed}
-							viewedCount={viewedCount}
-							totalFiles={files.length}
-							uncommittedFiles={uncommittedSet}
-							isLoading={diffLoading}
-							githubCommentFiles={showGitHubComments ? githubCommentFiles : undefined}
-						/>
+						{isBehaviorMode ? (
+							<FlowList
+								behaviors={behaviors}
+								orphanedSymbols={orphanedSymbols}
+								selectedBehaviorId={selectedBehaviorId}
+								onSelectBehavior={setSelectedBehaviorId}
+								onCollapse={() => setSidebarOpen(false)}
+								isReviewed={isFlowReviewed}
+								onToggleReviewed={toggleFlowReviewed}
+								reviewedCount={flowReviewedCount}
+								comments={comments}
+								isLoading={behaviorsLoading}
+							/>
+						) : (
+							<FileTree
+								files={files}
+								selectedFile={selectedFile}
+								commentCounts={commentCounts}
+								onSelectFile={setSelectedFile}
+								onCollapse={() => setSidebarOpen(false)}
+								isViewed={isViewed}
+								onToggleViewed={toggleViewed}
+								viewedCount={viewedCount}
+								totalFiles={files.length}
+								uncommittedFiles={uncommittedSet}
+								isLoading={diffLoading}
+								githubCommentFiles={showGitHubComments ? githubCommentFiles : undefined}
+							/>
+						)}
 					</div>
 				) : (
 					<button
 						onClick={() => setSidebarOpen(true)}
 						className="w-6 flex items-start pt-2.5 justify-center border-r border-zinc-800/50 bg-[#0a0a0f]/30 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors shrink-0"
-						title="Show files"
+						title={isBehaviorMode ? "Show flows" : "Show files"}
 					>
 						<svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
 							<path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -325,28 +371,73 @@ export default function ReviewPage() {
 					</button>
 				)}
 
-				{/* Diff viewer */}
-				<DiffViewer
-					rawDiff={diff}
-					viewType={viewType}
-					comments={comments}
-					githubComments={showGitHubComments ? githubComments : undefined}
-					activeCommentLocation={activeComment}
-					onGutterClick={handleGutterClick}
-					onSubmitComment={handleSubmitComment}
-					onCancelComment={handleCancelComment}
-					onResolveComment={handleResolveComment}
-					onDeleteComment={handleDeleteComment}
-					onReplyComment={handleReplyComment}
-					onReplyGitHubComment={handleReplyGitHubComment}
-					onResolveGitHubThread={handleResolveGitHubThread}
-					selectedFile={selectedFile}
-					isViewed={isViewed}
-					onToggleViewed={toggleViewed}
-					sessionId={sessionId}
-					onOpenInEditor={handleOpenInEditor}
-					isLoading={diffLoading}
-				/>
+				{/* Main panel: DiffViewer (diff mode) or FlowStepViewer (behavior mode) */}
+				{isBehaviorMode ? (
+					selectedBehavior ? (
+						<FlowStepViewer
+							behavior={selectedBehavior}
+							comments={comments}
+							activeCommentLocation={activeComment}
+							onGutterClick={handleGutterClick}
+							onSubmitComment={handleSubmitComment}
+							onCancelComment={handleCancelComment}
+							onResolveComment={handleResolveComment}
+							onDeleteComment={handleDeleteComment}
+							onReplyComment={handleReplyComment}
+							onViewInDiff={handleViewInDiff}
+							onOpenInEditor={handleOpenInEditor}
+							warnings={behaviorWarnings}
+						/>
+					) : (
+						<div className="flex-1 flex items-center justify-center text-zinc-600">
+							<div className="text-center">
+								{behaviorsLoading || isAnalyzing ? (
+									<>
+										<div className="w-5 h-5 mx-auto mb-2 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+										<div className="text-xs">{isAnalyzing ? "Claude is analyzing the code flows..." : "Loading..."}</div>
+										{isAnalyzing && <div className="text-[10px] text-zinc-700 mt-1">This may take 15-30 seconds</div>}
+									</>
+								) : behaviors.length > 0 ? (
+									<>
+										<div className="text-sm mb-1">Select a flow</div>
+										<div className="text-[11px] text-zinc-700">
+											{behaviors.length} flow{behaviors.length !== 1 ? "s" : ""} detected in this diff
+										</div>
+									</>
+								) : (
+									<>
+										<div className="text-sm mb-1">No flows detected</div>
+										<div className="text-[11px] text-zinc-700">
+											Switch to Diff mode to review changes file-by-file
+										</div>
+									</>
+								)}
+							</div>
+						</div>
+					)
+				) : (
+					<DiffViewer
+						rawDiff={diff}
+						viewType={viewType}
+						comments={comments}
+						githubComments={showGitHubComments ? githubComments : undefined}
+						activeCommentLocation={activeComment}
+						onGutterClick={handleGutterClick}
+						onSubmitComment={handleSubmitComment}
+						onCancelComment={handleCancelComment}
+						onResolveComment={handleResolveComment}
+						onDeleteComment={handleDeleteComment}
+						onReplyComment={handleReplyComment}
+						onReplyGitHubComment={handleReplyGitHubComment}
+						onResolveGitHubThread={handleResolveGitHubThread}
+						selectedFile={selectedFile}
+						isViewed={isViewed}
+						onToggleViewed={toggleViewed}
+						sessionId={sessionId}
+						onOpenInEditor={handleOpenInEditor}
+						isLoading={diffLoading}
+					/>
+				)}
 			</div>
 
 			{/* Bottom queue bar */}

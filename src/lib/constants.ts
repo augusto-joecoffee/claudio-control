@@ -29,3 +29,11 @@ export const OUTPUT_PROMPT_TIMEOUT_MS = 5 * 60_000;
 export const CLEAR_INTER_KEY_MS = 150;
 /** Settle time after sending Escape to clear the message bar before typing the next prompt. */
 export const CLEAR_SETTLE_MS = 300;
+/** Settle time after sending C-u to clear the input line for zero-message sessions. */
+export const CLEAR_LINE_SETTLE_MS = 200;
+/** Maximum number of retries when verifying the message bar is empty. */
+export const CLEAR_VERIFY_MAX_RETRIES = 3;
+/** Delay between verification retries. */
+export const CLEAR_VERIFY_RETRY_MS = 200;
+/** Maximum time to wait for JSONL-based completion confirmation before falling back to heuristic. */
+export const JSONL_COMPLETION_TIMEOUT_MS = 10 * 60_000;

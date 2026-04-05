@@ -8,6 +8,8 @@ interface CommitInfo {
 	subject: string;
 }
 
+export type ReviewMode = "diff" | "behavior";
+
 interface ReviewToolbarProps {
 	sessionName: string;
 	baseBranch: string;
@@ -24,6 +26,10 @@ interface ReviewToolbarProps {
 	showGitHubComments?: boolean;
 	onToggleGitHubComments?: () => void;
 	gitHubCommentCount?: number;
+	reviewMode?: ReviewMode;
+	onSetReviewMode?: (mode: ReviewMode) => void;
+	behaviorCount?: number;
+	isBehaviorLoading?: boolean;
 }
 
 const btnClass =
@@ -136,6 +142,10 @@ export const ReviewToolbar = memo(function ReviewToolbar({
 	showGitHubComments,
 	onToggleGitHubComments,
 	gitHubCommentCount,
+	reviewMode = "diff",
+	onSetReviewMode,
+	behaviorCount,
+	isBehaviorLoading,
 }: ReviewToolbarProps) {
 	return (
 		<div className="px-4 py-2.5 border-b border-zinc-800/50 bg-[#0a0a0f]/80 flex items-center gap-3 titlebar-no-drag relative z-[51]">
@@ -167,6 +177,40 @@ export const ReviewToolbar = memo(function ReviewToolbar({
 					</option>
 				))}
 			</select>
+
+			{/* Mode toggle */}
+			{onSetReviewMode && (
+				<div className="flex items-center rounded-md border border-zinc-700 overflow-hidden">
+					<button
+						onClick={() => onSetReviewMode("diff")}
+						className={`h-7 px-2.5 text-[11px] transition-colors ${
+							reviewMode === "diff"
+								? "bg-violet-500/15 border-r border-violet-500/50 text-violet-300"
+								: "border-r border-zinc-700 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+						}`}
+					>
+						Diff
+					</button>
+					<button
+						onClick={() => onSetReviewMode("behavior")}
+						className={`h-7 px-2.5 text-[11px] transition-colors flex items-center gap-1.5 ${
+							reviewMode === "behavior"
+								? "bg-violet-500/15 text-violet-300"
+								: "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+						}`}
+					>
+						Behavior
+						{isBehaviorLoading && (
+							<span className="w-2.5 h-2.5 rounded-full border border-current border-t-transparent animate-spin" />
+						)}
+						{!isBehaviorLoading && behaviorCount != null && behaviorCount > 0 && reviewMode !== "behavior" && (
+							<span className="text-[9px] px-1 rounded-full bg-violet-500/20 text-violet-400">
+								{behaviorCount}
+							</span>
+						)}
+					</button>
+				</div>
+			)}
 
 			<div className="flex-1" />
 

@@ -4,10 +4,12 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
-  closestCorners,
+  pointerWithin,
+  closestCenter,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
   type DragOverEvent,
@@ -99,6 +101,14 @@ function UnstagedColumn({ sessions, renderCard }: { sessions: ClaudeSession[]; r
     </div>
   );
 }
+
+// Pointer-first collision detection: use cursor position when inside a droppable,
+// fall back to closest-center so empty columns are still reachable.
+const pointerThenCenter: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  if (pointerHits.length > 0) return pointerHits;
+  return closestCenter(args);
+};
 
 interface KanbanBoardProps {
   config: KanbanConfig;
@@ -250,7 +260,7 @@ export function KanbanBoard({
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCorners}
+      collisionDetection={pointerThenCenter}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}

@@ -5,14 +5,12 @@ interface ClassifyInput {
   pid: number | null;
   jsonlMtime: Date | null;
   cpuPercent: number;
-  hasError: boolean;
   isAskingForInput: boolean;
   hasPendingToolUse: boolean;
 }
 
 export function classifyStatus(input: ClassifyInput): SessionStatus {
   if (input.pid === null) return "finished";
-  if (input.hasError) return "errored";
 
   const now = Date.now();
   const mtime = input.jsonlMtime?.getTime() ?? 0;
